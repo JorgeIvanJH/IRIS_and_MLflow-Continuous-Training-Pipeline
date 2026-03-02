@@ -90,7 +90,7 @@ Run python dur\sandbox\test_train.py to train and see performance tracking, and 
 
 
 ## Logging
-This repo uses Structured Logging to log every relevant aspect of the operational health of the CT pipeline. The configuration set on the iris_autoconf.sh file to keep for the "INFO" level, only "Utility.Event" events creates with the form
+This repo uses Structured Logging (https://docs.intersystems.com/irislatest/csp/docbook/DocBook.UI.Page.cls?KEY=GCM_structuredlog) to log every relevant aspect of the operational health of the CT pipeline. The configuration set on the iris_autoconf.sh file to keep for the "INFO" level, only "Utility.Event" events creates with the form
 
 do ##class(%SYS.System).WriteToConsoleLog(message, prefix, severity)
 
@@ -99,7 +99,24 @@ e.g:
     do ##class(%SYS.System).WriteToConsoleLog("This is my WARNING CT Log", 0, 1)
     do ##class(%SYS.System).WriteToConsoleLog("This is my SEVERE CT Log", 0, 2)
 
-This logging system is used throughout the whole pipeline for auditing purposes.
+This logging system is used throughout the whole pipeline for auditing purposes, and though all these logs can be seen in the managemente portal at System Operation > System Logs > Messages Log, the configuration done during the docker build, lets us have a persistent version at /dur/log/MLpipelineLogs.log, observable outside of the container, and in  JSON format for compatibility and any time analysis.
+
+## Feature Store
+
+All data for experimentation and for the CT pipeline is extracted from here.
+
+Feature store is the single source of data and where every constant Parameter for the project is defined (e.g. each cliend might define readmission after 15, 30 or more days. Late arrival might be consideret arriving after 5, 10, or 20 minutes). These definitions are only related to the data itself, no hyperparameters are defined here, as they relate to the ML pipeline
+
+In this repo we include the required methods for querying from DB, and Parameterts (unchangeable at runtime) are set in stone here.
+
+## Automated Pipeline
+
+The automated pipeline represents a formalized implementation of the data processing and model training done during the experimentation. This is implemented on the class AutomatedPipeline and has a method for each of the steps involved. 
+
+For the simple problem in thsi repo, we only:
+0. Data extraction: takes resulting query from Feature store (query with object script for faster SQL data extraction with native IRIS language) and transforms to pandas dataframe for ML processing
+1. Data Validation: validate missing values
+2. Data preparation: normalize centered in mean and 1 standard deviation
 
 
 
