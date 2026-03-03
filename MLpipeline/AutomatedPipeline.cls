@@ -1,6 +1,10 @@
 Class MLpipeline.AutomatedPipeline Extends %RegisteredObject
 {
 
+// Experiment Name for tracking purposes in MLflow or similar platforms (CONSTANT)
+
+Parameter EXPERIMENTNAME = "PRODUCTION_CT_Pipeline";
+
 // Seed for reproducibility in data splitting and model training
 
 Property SEED As %Integer;
@@ -159,15 +163,22 @@ e.g:
 */
 Method ModelTraining(Xtrain As %SYS.Python, Ytrain As %SYS.Python, params As %DynamicObject = "") As %SYS.Python [ Language = python ]
 {
+    import os
     import json
     import iris
     import pandas as pd
+    import mlflow
+    import mlflow.sklearn
     from sklearn.linear_model import LinearRegression
 
     try:
         if Xtrain is None or Ytrain is None:
             iris._SYS.System.WriteToConsoleLog("Received None Xtrain or Ytrain for model training.", 0, 2)
             raise ValueError("Input data is None")
+
+        mlflow.set_tracking_uri(os.getenv("MLFLOW_TRACKING_URI_IRIS"))
+        mlflow.set_experiment(self._GetParameter("EXPERIMENTNAME"))
+        mlflow.sklearn.autolog()
 
         # Parse Parameters
         if params == "":

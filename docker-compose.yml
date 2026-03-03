@@ -6,6 +6,8 @@ services:
       context: . # Path to the directory containing the Dockerfile
       dockerfile: Dockerfile
     container_name: iris-experimentation
+    env_file:
+      - .env
     ports:
       - "1972:1972"    # SuperServer port
       - "52773:52773"  # Management Portal/Web Gateway
@@ -83,6 +85,7 @@ services:
       create-bucket:
         condition: service_completed_successfully
     environment:
+      MLFLOW_SERVER_ALLOWED_HOSTS: "mlflow,mlflow-server,localhost,127.0.0.1"
       MLFLOW_BACKEND_STORE_URI: ${MLFLOW_BACKEND_STORE_URI}
       MLFLOW_S3_ENDPOINT_URL: ${MLFLOW_S3_ENDPOINT_URL}
       MLFLOW_ARTIFACTS_DESTINATION: ${MLFLOW_ARTIFACTS_DESTINATION}
@@ -102,7 +105,8 @@ services:
           --artifacts-destination "${MLFLOW_ARTIFACTS_DESTINATION}" \
           --serve-artifacts \
           --host "${MLFLOW_HOST}" \
-          --port "${MLFLOW_PORT}"
+          --port "${MLFLOW_PORT}" \
+          --allowed-hosts "mlflow:${MLFLOW_PORT},mlflow-server:${MLFLOW_PORT},localhost:*,127.0.0.1:*"
     ports:
       - "${MLFLOW_PORT}:${MLFLOW_PORT}"
     # optional: keep mlflow logs in that folder
