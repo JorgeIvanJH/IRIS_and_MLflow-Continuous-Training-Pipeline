@@ -38,6 +38,8 @@ irislogd -f /dur/log/MLpipelineLogs.log
 JSON
 1
 -Audit.*,-Utility.*,-Log.*,-Generic.*,-System.*,+Utility.*
+SYS.LogDmm:Enable
+1
 7
 q
 
