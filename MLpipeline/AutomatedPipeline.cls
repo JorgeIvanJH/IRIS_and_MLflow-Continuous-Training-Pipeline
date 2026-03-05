@@ -21,6 +21,10 @@ Property TESTSIZE As %Numeric(SCALE = 2);
 
 Property MODEL As %SYS.Python;
 
+// Essential columns for the model to function properly (e.g., ["x", "y"] for a simple regression task)
+
+Property ESSENTIALCOLUMNS As %List;
+
 // Model parameters stored as a dynamic object for flexibility (e.g., {"fit_intercept": True})
 
 Property MODELPARAMS As %DynamicObject;
@@ -36,8 +40,10 @@ e.g:
 */
 Method %OnNew(seed As %Integer = 42, testSize As %Numeric(SCALE=2) = 0.2, modelParams As %DynamicObject = "") As %Status [ Private ]
 {
+    do ##class(%SYS.System).WriteToConsoleLog("Initializing MLpipeline.AutomatedPipeline instance.", 0, 0)
     set ..SEED = seed
     set ..TESTSIZE = testSize
+    set ..ESSENTIALCOLUMNS = $lb("x", "y")
     if modelParams = "" {
         set ..MODELPARAMS = {"fit_intercept": true} // Default parameters for LinearRegression
     } else {
@@ -83,17 +89,16 @@ Method DataExtraction(datetimestr As %String) As %SYS.Python [ Language = python
         parsed_dt = dt.datetime.strptime(datetimestr, "%Y-%m-%d %H:%M:%S")
         safe_literal = parsed_dt.strftime("%Y-%m-%d %H:%M:%S")
         os_rs = FS.DataExtraction("MLpipeline", "PointSamples", "*", f"datetime > '{safe_literal}'")
-        print("Data Extraction ResultSet:", os_rs)
         py_rs = iris.cls("%SYS.Python.SQLResultSet")._New(os_rs)
         df = py_rs.dataframe()
         shape = df.shape
-        iris._SYS.System.WriteToConsoleLog(f"DataFrame ready. Shape: {shape}", 0, 0)
         if shape == (0, 0): # Warning for empty result
             iris._SYS.System.WriteToConsoleLog("Query returned an empty DataFrame.", 0, 1)
+        iris._SYS.System.WriteToConsoleLog(f"DataExtraction completed.", 0, 0)
         return df
     except Exception as e:
-        print("Error during Data Extraction:", e)
-        iris._SYS.System.WriteToConsoleLog(f"Extraction Error: {str(e)}", 0, 2)
+        print(f"DataExtraction Error: {str(e)}")
+        iris._SYS.System.WriteToConsoleLog(f"DataExtraction Error: {str(e)}", 0, 2)
         return None
 }
 
@@ -106,29 +111,42 @@ e.g:
 */
 Method DataValidation(df As %SYS.Python) As %SYS.Python [ Language = python ]
 {
-    # TODO: Check data shift (data schema skews and data values skews)
     import iris
     import pandas as pd
     
     try:
-        if df is None:
-            iris._SYS.System.WriteToConsoleLog("Received None DataFrame for validation.", 0, 2)
-            raise ValueError("Input DataFrame is None")
-        
         # Missing Values
         missing_values = df.isnull().sum()
         if missing_values.sum() > 0:
             iris._SYS.System.WriteToConsoleLog(f"Missing values in DataFrame: {missing_values}", 0, 1)
-        
-        # Additional validations can be added here (e.g. OUTLIERS)
 
+        # Missing Required Columns
+        essential_cols = iris.cls("%SYS.Python").ToList(self.ESSENTIALCOLUMNS)
+        missing_columns = [col for col in essential_cols if col not in df.columns]
+        if missing_columns:
+            iris._SYS.System.WriteToConsoleLog(f"Missing essential columns in DataFrame: {missing_columns}", 0, 2)
+        
+        # Data types check (e.g., ensure "x" and "y" are numeric)
+        for col in essential_cols:
+            if col in df.columns and not pd.api.types.is_numeric_dtype(df[col]):
+                iris._SYS.System.WriteToConsoleLog(f"Column '{col}' has incorrect data type. Expected numeric.", 0, 2)
+
+        # Significant outliers (e.g., using IQR method)
+        for col in essential_cols:
+            df_col = df[col]
+            Q1 = df_col.quantile(0.25)
+            Q3 = df_col.quantile(0.75)
+            IQR = Q3 - Q1
+            outliers = ((df_col < (Q1 - 1.5 * IQR)) | (df_col > (Q3 + 1.5 * IQR))).sum()
+            if outliers.sum() > 0:
+                iris._SYS.System.WriteToConsoleLog(f"Outliers detected in DataFrame: {outliers}", 0, 1)
 
         # End of validation
-        iris._SYS.System.WriteToConsoleLog("DataFrame validation completed successfully.", 0, 0)
+        iris._SYS.System.WriteToConsoleLog("DataValidation completed.", 0, 0)
         return df
     except Exception as e:
-        print("Error during Data Validation:", e)
-        iris._SYS.System.WriteToConsoleLog(f"Validation Error: {str(e)}", 0, 2)
+        print(f"DataValidation Error: {str(e)}")
+        iris._SYS.System.WriteToConsoleLog(f"DataValidation Error: {str(e)}", 0, 2)
         return None
 }
 
@@ -146,20 +164,13 @@ Method DataPreparation(df As %SYS.Python) As %SYS.Python [ Language = python ]
     import pandas as pd
     from sklearn.model_selection import train_test_split
     
-    try:
-        if df is None:
-            iris._SYS.System.WriteToConsoleLog("Received None DataFrame for preparation.", 0, 2)
-            raise ValueError("Input DataFrame is None")
-        
-        iris._SYS.System.WriteToConsoleLog("Splitting DataFrame into training and test sets.", 0, 0)
-        
+    try:       
         Xtrain, Xtest, Ytrain, Ytest = train_test_split(df[["x"]], df["y"], test_size=self.TESTSIZE, random_state=self.SEED)
-
-        iris._SYS.System.WriteToConsoleLog("Data preparation completed successfully.", 0, 0)
+        iris._SYS.System.WriteToConsoleLog("DataPreparation completed.", 0, 0)
         return (Xtrain, Ytrain, Xtest, Ytest)
     except Exception as e:
-        print("Error during Data Preparation:", e)
-        iris._SYS.System.WriteToConsoleLog(f"Preparation Error: {str(e)}", 0, 2)
+        print(f"DataPreparation Error: {str(e)}")
+        iris._SYS.System.WriteToConsoleLog(f"DataPreparation Error: {str(e)}", 0, 2)
         return None
 }
 
@@ -191,10 +202,6 @@ Method ModelTraining(Xtrain As %SYS.Python, Ytrain As %SYS.Python, params As %Dy
 
 
     try:
-        if Xtrain is None or Ytrain is None:
-            iris._SYS.System.WriteToConsoleLog("Received None Xtrain or Ytrain for model training.", 0, 2)
-            raise ValueError("Input data is None")
-
         mlflow.set_tracking_uri(os.getenv("MLFLOW_TRACKING_URI_IRIS"))
         mlflow.set_experiment(self._GetParameter("EXPERIMENTNAME"))
         mlflow.sklearn.autolog()
@@ -206,14 +213,15 @@ Method ModelTraining(Xtrain As %SYS.Python, Ytrain As %SYS.Python, params As %Dy
         else:
             self.MODELPARAMS = params
             iris._SYS.System.WriteToConsoleLog(f"Received new parameters for model training: {params}", 0, 0)
-
         params_dict = json.loads(params._ToJSON())
 
+        # Define the entire pipeline with learned transformations and model
         model = Pipeline([
             ('scaler', StandardScaler()),
             ('model', LinearRegression(**params_dict))
         ])
 
+        # Training and logging with MLflow
         with mlflow.start_run(run_id=self.MLFLOWRUNID):
             iris._SYS.System.WriteToConsoleLog("Training LinearRegression model with provided training data and parameters.", 0, 0)
             model.fit(Xtrain, Ytrain)
@@ -226,17 +234,13 @@ Method ModelTraining(Xtrain As %SYS.Python, Ytrain As %SYS.Python, params As %Dy
                 "train_mae": mean_absolute_error(Ytrain, y_pred_train),
                 "train_r2": r2_score(Ytrain, y_pred_train),
             })
-
-            # Store the trained model in the class property for later use in evaluation and validation
             self.MODEL = model
+            iris._SYS.System.WriteToConsoleLog("ModelTraining completed.", 0, 0)
             return model
 
     except Exception as e:
-
-        print("Error during Model Training:", e)
-
-        iris._SYS.System.WriteToConsoleLog(f"Model Training Error: {str(e)}", 0, 2)
-
+        print(f"ModelTraining Error: {str(e)}")
+        iris._SYS.System.WriteToConsoleLog(f"ModelTraining Error: {str(e)}", 0, 2)
         return None
 }
 
@@ -256,50 +260,44 @@ e.g:
 */
 Method ModelEvaluation(model As %SYS.Python, Xtest As %SYS.Python, Ytest As %SYS.Python) As %SYS.Python [ Language = python ]
 {
+    import os
     import iris
     import pandas as pd
     import mlflow
     from sklearn.metrics import mean_absolute_error, r2_score
     
     try:
-        if model is None:
-            iris._SYS.System.WriteToConsoleLog("No trained model available for evaluation.", 0, 2)
-            raise ValueError("Model is None")
-        if Xtest is None or Ytest is None:
-            iris._SYS.System.WriteToConsoleLog("Received None Xtest or Ytest for model evaluation.", 0, 2)
-            raise ValueError("Input data is None")
-
         mlflow.set_tracking_uri(os.getenv("MLFLOW_TRACKING_URI_IRIS"))
         mlflow.set_experiment(self._GetParameter("EXPERIMENTNAME"))
+        mlflow.sklearn.autolog()
 
+        # Test logging with MLflow on the same run as training
         with mlflow.start_run(run_id=self.MLFLOWRUNID):
 
-            iris._SYS.System.WriteToConsoleLog("Making predictions with the trained model on test data.", 0, 0)
             y_pred_test = model.predict(Xtest)
-            
             mae = mean_absolute_error(Ytest, y_pred_test)
             r2 = r2_score(Ytest, y_pred_test)
             mlflow.log_metrics({
                 "val_mae": mae,
                 "val_r2": r2
             })
-            iris._SYS.System.WriteToConsoleLog(f"Model Evaluation completed. MAE: {mae}, R2 Score: {r2}", 0, 0)
+            iris._SYS.System.WriteToConsoleLog(f"ModelEvaluation completed. MAE: {mae}, R2 Score: {r2}", 0, 0)
 
             return {"MAE": mae, "R2_Score": r2}
 
     except Exception as e:
-        print("Error during Model Evaluation:", e)
-        iris._SYS.System.WriteToConsoleLog(f"Model Evaluation Error: {str(e)}", 0, 2)
+        print(f"ModelEvaluation Error: {str(e)}", e)
+        iris._SYS.System.WriteToConsoleLog(f"ModelEvaluation Error: {str(e)}", 0, 2)
         return None
 }
 
 /*
-Runs the entire ML pipeline sequentially.
+Runs the entire ML pipeline sequentially. Handles Each component's try/except.
 e.g:
     set AP = ##class(MLpipeline.AutomatedPipeline).%New()
-    do AP.RunPipeline("2026-02-26 17:50:00")
+    set summary = AP.RunPipeline("2026-02-26 17:50:00")
 */
-Method RunPipeline(datetime As %String) [ Language = python ]
+Method RunPipeline(datetimestr As %String) As %SYS.Python [ Language = python ]
 {
     import iris
     import pandas as pd
@@ -308,8 +306,8 @@ Method RunPipeline(datetime As %String) [ Language = python ]
         iris._SYS.System.WriteToConsoleLog("Starting Automated ML Pipeline execution.", 0, 0)
         
         # Step 1: Data Extraction
-        iris._SYS.System.WriteToConsoleLog(f"Starting DataExtraction with datetime filter: {datetime}", 0, 0)
-        df = self.DataExtraction(datetime)
+        iris._SYS.System.WriteToConsoleLog(f"Starting DataExtraction for date: {datetimestr}", 0, 0)
+        df = self.DataExtraction(datetimestr)
         
         # Step 2: Data Validation
         iris._SYS.System.WriteToConsoleLog("Starting DataValidation.", 0, 0)
