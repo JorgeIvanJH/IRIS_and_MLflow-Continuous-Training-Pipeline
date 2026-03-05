@@ -38,17 +38,13 @@ Set default values of parameters when a new instance of AutomatedPipeline is cre
 e.g:
     set AP = ##class(MLpipeline.AutomatedPipeline).%New()
 */
-Method %OnNew(seed As %Integer = 42, testSize As %Numeric(SCALE=2) = 0.2, modelParams As %DynamicObject = "") As %Status [ Private ]
+Method %OnNew(seed As %Integer = 42, testSize As %Numeric(SCALE=2) = 0.2) As %Status [ Private ]
 {
     do ##class(%SYS.System).WriteToConsoleLog("Initializing MLpipeline.AutomatedPipeline instance.", 0, 0)
     set ..SEED = seed
     set ..TESTSIZE = testSize
     set ..ESSENTIALCOLUMNS = $lb("x", "y")
-    if modelParams = "" {
-        set ..MODELPARAMS = {"fit_intercept": true} // Default parameters for LinearRegression
-    } else {
-        set ..MODELPARAMS = modelParams
-    }
+    set ..MODELPARAMS = {"fit_intercept": true} // Default parameters for LinearRegression
 
     set status = $$$OK
     set runid = ""
@@ -68,7 +64,7 @@ Method %OnNew(seed As %Integer = 42, testSize As %Numeric(SCALE=2) = 0.2, modelP
         do ##class(%SYS.System).WriteToConsoleLog("MLflow Error: "_ex.DisplayString(), 0, 2)
     }
 
-    do ##class(%SYS.System).WriteToConsoleLog("Created instance of MLpipeline.AutomatedPipeline with SEED="_seed_" TESTSIZE="_testSize_" MODELPARAMS="_..MODELPARAMS, 0, 0)
+    do ##class(%SYS.System).WriteToConsoleLog("Created instance of MLpipeline.AutomatedPipeline with SEED="_seed_" TESTSIZE="_testSize, 0, 0)
     Quit status
 }
 
@@ -207,13 +203,8 @@ Method ModelTraining(Xtrain As %SYS.Python, Ytrain As %SYS.Python, params As %Dy
         mlflow.sklearn.autolog()
 
         # Parse Parameters
-        if params == "":
-            params = self.MODELPARAMS
-            iris._SYS.System.WriteToConsoleLog(f"No parameters provided. Using existing ..MODELPARAMS: {params}", 0, 0)
-        else:
-            self.MODELPARAMS = params
-            iris._SYS.System.WriteToConsoleLog(f"Received new parameters for model training: {params}", 0, 0)
         params_dict = json.loads(params._ToJSON())
+        iris._SYS.System.WriteToConsoleLog(f"ModelTraining received parameters: {params_dict}", 0, 0)
 
         # Define the entire pipeline with learned transformations and model
         model = Pipeline([
