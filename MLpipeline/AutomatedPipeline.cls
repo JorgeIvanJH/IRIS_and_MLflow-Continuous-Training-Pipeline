@@ -5,6 +5,10 @@ Class MLpipeline.AutomatedPipeline Extends %RegisteredObject
 
 Parameter EXPERIMENTNAME = "PRODUCTION_CT_Pipeline";
 
+// Storage location for the trained models 
+
+Parameter MODELSPATH = "/dur/models/";
+
 // Seed for reproducibility in data splitting and model training
 
 Property SEED As %Integer;
@@ -216,6 +220,12 @@ Method ModelTraining(Xtrain As %SYS.Python, Ytrain As %SYS.Python, params As %Dy
         with mlflow.start_run(run_id=self.MLFLOWRUNID):
             iris._SYS.System.WriteToConsoleLog("Training LinearRegression model with provided training data and parameters.", 0, 0)
             model.fit(Xtrain, Ytrain)
+
+            # Saving Model
+            model_path = os.path.join(self._GetParameter("MODELSPATH"), self.MLFLOWRUNID) # TODO: set in the initialization
+            mlflow.sklearn.save_model(model, model_path)
+
+            
             iris._SYS.System.WriteToConsoleLog("Model training completed successfully.", 0, 0)
             # Calculate metrics
             y_pred_train = model.predict(Xtrain)
@@ -225,6 +235,9 @@ Method ModelTraining(Xtrain As %SYS.Python, Ytrain As %SYS.Python, params As %Dy
                 "train_mae": mean_absolute_error(Ytrain, y_pred_train),
                 "train_r2": r2_score(Ytrain, y_pred_train),
             })
+
+            # Tag successful training for future identification of runs
+            mlflow.set_tag("TrainingStatus", "OK")
             self.MODEL = model
             iris._SYS.System.WriteToConsoleLog("ModelTraining completed.", 0, 0)
             return model
@@ -272,6 +285,10 @@ Method ModelEvaluation(model As %SYS.Python, Xtest As %SYS.Python, Ytest As %SYS
                 "val_mae": mae,
                 "val_r2": r2
             })
+
+            # Tag successful evaluation for future identification of runs
+            mlflow.set_tag("EvaluationStatus", "OK")
+
             iris._SYS.System.WriteToConsoleLog(f"ModelEvaluation completed. MAE: {mae}, R2 Score: {r2}", 0, 0)
 
             return {"MAE": mae, "R2_Score": r2}
@@ -280,6 +297,61 @@ Method ModelEvaluation(model As %SYS.Python, Xtest As %SYS.Python, Ytest As %SYS
         print(f"ModelEvaluation Error: {str(e)}", e)
         iris._SYS.System.WriteToConsoleLog(f"ModelEvaluation Error: {str(e)}", 0, 2)
         return None
+}
+
+/*
+Validation before promoting model to production. Compares performance to a baseline metric or previous model.
+e.g:
+    set AP = ##class(MLpipeline.AutomatedPipeline).%New()
+    set df = AP.DataExtraction("2026-02-26 17:50:00")
+    set validDf = AP.DataValidation(df)
+    set result  = AP.DataPreparation(validDf)
+    Set Xtrain = result."__getitem__"(0)
+    Set Ytrain = result."__getitem__"(1)
+    Set Xtest  = result."__getitem__"(2)
+    Set Ytest  = result."__getitem__"(3)
+    set model = AP.ModelTraining(Xtrain, Ytrain, {"fit_intercept": true})
+    set evalResults = AP.ModelEvaluation(model, Xtest, Ytest)
+    do AP.ModelValidation(evalResults, Xtest, Ytest)
+*/
+Method ModelValidation(evalResults As %SYS.Python, Xtest As %SYS.Python, Ytest As %SYS.Python) As %SYS.Python [ Language = python ]
+{
+    import os
+    import mlflow
+    import pandas as pd
+    from sklearn.metrics import mean_absolute_error, r2_score
+
+    print("Starting ModelValidation. ")
+    exp = mlflow.get_experiment_by_name(self._GetParameter("EXPERIMENTNAME"))
+    print("exp: ", exp)
+    runs = mlflow.search_runs(
+        experiment_ids=[exp.experiment_id],
+        filter_string="tags.TrainingStatus = 'OK' and tags.EvaluationStatus = 'OK' ",
+        order_by=["attributes.end_time DESC"],
+        max_results=5
+    )
+    print("runs: ", runs)
+    previous_runs = runs[runs["run_id"] != self.MLFLOWRUNID]
+    print("previous_runs: ", previous_runs)
+    if not previous_runs.empty:
+        last_run = previous_runs.iloc[0]
+        last_run_id = last_run["run_id"]
+        last_model_path = os.path.join(self._GetParameter("MODELSPATH"), last_run_id)
+        print("Last successful run found. Run ID:", last_run_id, "Model Path:", last_model_path)
+        last_model = mlflow.sklearn.load_model(last_model_path)
+        print("Loaded baseline model from run:", last_run_id, "name:", last_run.get("tags.mlflow.runName"))
+        y_pred_test = last_model.predict(Xtest)
+        mae = mean_absolute_error(Ytest, y_pred_test)
+        r2 = r2_score(Ytest, y_pred_test)
+        print(f"Old Model Evaluation - MAE: {mae}, R2 Score: {r2}")
+        print(f"New Model Evaluation - MAE: {evalResults['MAE']}, R2 Score: {evalResults['R2_Score']}")
+        if evalResults["MAE"] < mae and evalResults["R2_Score"] > r2:
+            print("New model outperforms the baseline. Ready for promotion to production.")
+        else:
+            print("New model does not outperform the baseline. Keep the old model.")
+    else:
+        baseline_model = None
+        print("No previous successful run found.")
 }
 
 /*
