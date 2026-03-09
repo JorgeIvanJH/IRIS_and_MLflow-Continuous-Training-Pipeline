@@ -223,7 +223,7 @@ Method ModelTraining(Xtrain As %SYS.Python, Ytrain As %SYS.Python, params As %Dy
 
             # Saving Model
             model_path = os.path.join(self._GetParameter("MODELSPATH"), self.MLFLOWRUNID) # TODO: set in the initialization
-            mlflow.sklearn.save_model(model, model_path)
+            mlflow.sklearn.save_model(model, model_path) # TODO: Write a function to download and save here from the server to local based from the run id
 
             
             iris._SYS.System.WriteToConsoleLog("Model training completed successfully.", 0, 0)
@@ -260,7 +260,7 @@ e.g:
     Set Xtest  = result."__getitem__"(2)
     Set Ytest  = result."__getitem__"(3)
     set model = AP.ModelTraining(Xtrain, Ytrain, {"fit_intercept": true})
-    set evalResults = AP.ModelEvaluation(model, Xtest, Ytest)
+    set newmodelmetrics = AP.ModelEvaluation(model, Xtest, Ytest)
 */
 Method ModelEvaluation(model As %SYS.Python, Xtest As %SYS.Python, Ytest As %SYS.Python) As %SYS.Python [ Language = python ]
 {
@@ -281,17 +281,15 @@ Method ModelEvaluation(model As %SYS.Python, Xtest As %SYS.Python, Ytest As %SYS
             y_pred_test = model.predict(Xtest)
             mae = mean_absolute_error(Ytest, y_pred_test)
             r2 = r2_score(Ytest, y_pred_test)
-            mlflow.log_metrics({
-                "val_mae": mae,
-                "val_r2": r2
-            })
+            metrics = {"val_mae": mae, "val_r2": r2}
+            mlflow.log_metrics(metrics)
 
             # Tag successful evaluation for future identification of runs
             mlflow.set_tag("EvaluationStatus", "OK")
 
             iris._SYS.System.WriteToConsoleLog(f"ModelEvaluation completed. MAE: {mae}, R2 Score: {r2}", 0, 0)
 
-            return {"MAE": mae, "R2_Score": r2}
+            return metrics
 
     except Exception as e:
         print(f"ModelEvaluation Error: {str(e)}", e)
@@ -300,7 +298,7 @@ Method ModelEvaluation(model As %SYS.Python, Xtest As %SYS.Python, Ytest As %SYS
 }
 
 /*
-Validation before promoting model to production. Compares performance to a baseline metric or previous model.
+Validation before promoting model to production. Compares performance to a baseline metric or previous model. Returns the best model's run ID for promotion.
 e.g:
     set AP = ##class(MLpipeline.AutomatedPipeline).%New()
     set df = AP.DataExtraction("2026-02-26 17:50:00")
@@ -311,47 +309,55 @@ e.g:
     Set Xtest  = result."__getitem__"(2)
     Set Ytest  = result."__getitem__"(3)
     set model = AP.ModelTraining(Xtrain, Ytrain, {"fit_intercept": true})
-    set evalResults = AP.ModelEvaluation(model, Xtest, Ytest)
-    do AP.ModelValidation(evalResults, Xtest, Ytest)
+    set newmodelmetrics = AP.ModelEvaluation(model, Xtest, Ytest)
+    set bestrunid = AP.ModelValidation(newmodelmetrics, Xtest, Ytest)
 */
-Method ModelValidation(evalResults As %SYS.Python, Xtest As %SYS.Python, Ytest As %SYS.Python) As %SYS.Python [ Language = python ]
+Method ModelValidation(newmodelmetrics As %SYS.Python, Xtest As %SYS.Python, Ytest As %SYS.Python) As %SYS.Python [ Language = python ]
 {
     import os
+    import iris
     import mlflow
     import pandas as pd
     from sklearn.metrics import mean_absolute_error, r2_score
 
-    print("Starting ModelValidation. ")
+    # Fetch valid previous runs in MLflow
     exp = mlflow.get_experiment_by_name(self._GetParameter("EXPERIMENTNAME"))
-    print("exp: ", exp)
     runs = mlflow.search_runs(
         experiment_ids=[exp.experiment_id],
         filter_string="tags.TrainingStatus = 'OK' and tags.EvaluationStatus = 'OK' ",
         order_by=["attributes.end_time DESC"],
         max_results=5
     )
-    print("runs: ", runs)
+    # Get most recent previous run that is not the current run
     previous_runs = runs[runs["run_id"] != self.MLFLOWRUNID]
-    print("previous_runs: ", previous_runs)
     if not previous_runs.empty:
         last_run = previous_runs.iloc[0]
         last_run_id = last_run["run_id"]
+        last_run_name = last_run.get("tags.mlflow.runName")
         last_model_path = os.path.join(self._GetParameter("MODELSPATH"), last_run_id)
-        print("Last successful run found. Run ID:", last_run_id, "Model Path:", last_model_path)
         last_model = mlflow.sklearn.load_model(last_model_path)
-        print("Loaded baseline model from run:", last_run_id, "name:", last_run.get("tags.mlflow.runName"))
-        y_pred_test = last_model.predict(Xtest)
-        mae = mean_absolute_error(Ytest, y_pred_test)
-        r2 = r2_score(Ytest, y_pred_test)
-        print(f"Old Model Evaluation - MAE: {mae}, R2 Score: {r2}")
-        print(f"New Model Evaluation - MAE: {evalResults['MAE']}, R2 Score: {evalResults['R2_Score']}")
-        if evalResults["MAE"] < mae and evalResults["R2_Score"] > r2:
-            print("New model outperforms the baseline. Ready for promotion to production.")
+        iris._SYS.System.WriteToConsoleLog(f"Last successful run found and loaded. Model Name: {last_run_name} Run ID: {last_run_id} Model Path: {last_model_path}", 0, 0)
+        # Evaluate the last model on the current test set for comparison
+        new_y_pred = last_model.predict(Xtest)
+        mae = mean_absolute_error(Ytest, new_y_pred)
+        r2 = r2_score(Ytest, new_y_pred)
+        oldmodelmetrics = {"val_mae": mae, "val_r2": r2}
+        iris._SYS.System.WriteToConsoleLog(f"Old Model Evaluation - MAE: {mae}, R2 Score: {r2}", 0, 0)
+        iris._SYS.System.WriteToConsoleLog(f"New Model Evaluation - MAE: {newmodelmetrics['val_mae']}, R2 Score: {newmodelmetrics['val_r2']}", 0, 0)
+        # Metrics comparison logic
+        if newmodelmetrics["val_mae"] < mae and newmodelmetrics["val_r2"] > r2:
+            iris._SYS.System.WriteToConsoleLog("New model outperforms the baseline.", 0, 0)
+            best_run_id = self.MLFLOWRUNID
         else:
-            print("New model does not outperform the baseline. Keep the old model.")
+            iris._SYS.System.WriteToConsoleLog("New model does not outperform the baseline, old model is kept.", 0, 0)
+            best_run_id = last_run_id
     else:
         baseline_model = None
         print("No previous successful run found.")
+        iris._SYS.System.WriteToConsoleLog("No previous successful run found for ModelValidation, best model is current model.", 0, 0)
+        best_run_id = self.MLFLOWRUNID
+    
+    return best_run_id
 }
 
 /*
@@ -387,13 +393,38 @@ Method RunPipeline(datetimestr As %String) As %SYS.Python [ Language = python ]
 
         # Step 5: Model Evaluation
         iris._SYS.System.WriteToConsoleLog("Starting ModelEvaluation.", 0, 0)
-        eval_results = self.ModelEvaluation(model, Xtest, Ytest)
+        newmodelmetrics = self.ModelEvaluation(model, Xtest, Ytest)
 
-        iris._SYS.System.WriteToConsoleLog(f"Automated ML Pipeline execution completed. Evaluation Results: {eval_results}", 0, 0)
-    
+        # Step 6: Model Validation
+        iris._SYS.System.WriteToConsoleLog("Starting ModelValidation.", 0, 0)
+        bestrunid = self.ModelValidation(newmodelmetrics, Xtest, Ytest)
+        iris._SYS.System.WriteToConsoleLog(f"Automated ML Pipeline execution completed. Best Run ID: {bestrunid}", 0, 0)
+
+        # Model Promoting process
+        if bestrunid == self.MLFLOWRUNID:
+            input = input("New model outperforms the baseline. Do you want to promote it to production? (yes/no): ")
+            iris._SYS.System.WriteToConsoleLog(f"User input for model promotion: {input}", 0, 0)
+            if input.lower() == "yes":
+                iris._SYS.System.WriteToConsoleLog(f"New model to be promoted to production.", 0, 0)
+                print("TODO: PROMOTE MODEL TO PRODUCTION")
+            else:
+                iris._SYS.System.WriteToConsoleLog("Model promotion declined by user. Old model is kept.", 0, 0)
+                print("Model promotion declined. Old model is kept.")
     except Exception as e:
         print("Error during Pipeline Execution:", e)
         iris._SYS.System.WriteToConsoleLog(f"Pipeline Execution Error: {str(e)}", 0, 2)
 }
+
+// TODO: Identifier of whether data was already used before for training (NEXT ONE)!!!
+
+// TODO: Should i also add datetime limit (from _ to _ ) instead of just all values after _? for reproducibility, recreate experiments... 
+
+// TODO: Engure reproducibility somehow for any moment, run_id or whatever to go back and rerun aprevious process
+
+// TODO: For model performance tracking, see timeline of prediction performance to identify patterns.
+
+// TODO: Check for model and data drift in a given interval, and see drift trends on monitoring dashboard
+
+// TODO: Add functionality to promote model to production
 
 }

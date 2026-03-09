@@ -121,4 +121,16 @@ For the simple problem in thsi repo, we only:
 
 
 
+Trigger: Manual (can be on new data, or on a schedule, or on model degradation, etc)
+
+Automatic Pipeline Flow:
+    Data Extraction (In: filter, Process: Query, Out: Dataframe)
+    Data Validation (In: Dataframe, Process: Check data skews, Out: Dataframe)
+    Data Preparation (In: Dataframe, Process: splitting, Out: train/test splits)
+    Model Training (In: train split, Process: model training, Out: model)
+    Model Evaluation (In: model & test split, Process: model evaluation, Out: metrics)
+    Model Validation (In: metrics & test split, Process: compare new and old model with current test split, Out: run_id of best model)
+
+
+
 docker exec -it iris-experimentation iris terminal iris
