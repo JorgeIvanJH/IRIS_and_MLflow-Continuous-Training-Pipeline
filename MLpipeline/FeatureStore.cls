@@ -11,10 +11,66 @@ Method %OnNew() As %Status [ Private ]
     Quit $$$OK
 }
 
-/// Extracts data from IRIS database using SQL query constructed from the input parameters.
-/// e.g:
-///    set FS = ##class(MLpipeline.FeatureStore).%New()
-///    set rs = FS.DataExtraction("MLpipeline", "PointSamples", "*", "datetime > '2026-02-26 17:50:00'")
+/*
+Populates an IRIS table data from CSV file at csvpath. Automatically detects and converts date columns. 
+e.g:
+    set FS = ##class(MLpipeline.FeatureStore).%New()
+    set status = FS.UploadCSVtoIRIS("/dur/data/point_samples.csv","USER", "MLpipeline","PointSamples")
+*/
+Method UploadCSVtoIRIS(csvpath As %String, namespace As %String, package As %String, tablename As %String) As %Status [ Language = python ]
+{
+    from sqlalchemy import create_engine, text
+    import pandas as pd
+    import iris
+    
+    try:
+        iris._SYS.System.WriteToConsoleLog(f"Starting CSV upload to IRIS: {csvpath} into {namespace}.{package}.{tablename}", 0, 0)
+        engine = create_engine(f"iris+emb:///{namespace}")
+
+        create_table_sql = f"""
+        CREATE TABLE {package}.{tablename} (
+            ID INTEGER PRIMARY KEY IDENTITY(1,1),
+            x DOUBLE,
+            y DOUBLE,
+            label VARCHAR(50),
+            datetime DATETIME
+        )
+        """
+        
+        with engine.connect() as conn:
+            # Check if table exists
+            check_sql = text("SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = :sch AND TABLE_NAME = :tab")
+            result = conn.execute(check_sql, {"sch": package, "tab": tablename}).fetchone()
+            
+            if not result:
+                conn.execute(text(create_table_sql))
+                conn.commit()
+
+        df = pd.read_csv(csvpath)
+
+        for col in df.select_dtypes(include=["object"]).columns:
+            sample = df[col].dropna().astype(str).head(20)
+            try:
+                parsed = pd.to_datetime(sample, errors="raise") # just to validate
+                df[col] = pd.to_datetime(df[col], errors="coerce") # actual conversion
+            except Exception:
+                continue
+        df.to_sql(tablename, engine, schema=package, if_exists='append', index=False, method='multi')
+        iris._SYS.System.WriteToConsoleLog("Successfully uploaded CSV to IRIS", 0, 0)
+        return True
+
+    except Exception as e:
+        print(f"Error uploading CSV to IRIS: {e}")
+        iris._SYS.System.WriteToConsoleLog(f"Error uploading CSV to IRIS: {e}", 0, 2)
+        return False
+}
+
+/*
+Extracts data from IRIS database using SQL query constructed from the input parameters.
+e.g:
+   set FS = ##class(MLpipeline.FeatureStore).%New()
+   set rs = FS.DataExtraction("MLpipeline", "PointSamples", "*", "datetime > '2026-02-26 17:50:00'")
+*/
 Method DataExtraction(schema As %String, tablename As %String, columns As %String = "*", filters As %String = "") As %SQL.StatementResult
 {
     set query = "SELECT " _ columns _ " FROM " _ schema _ "." _ tablename
