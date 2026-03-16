@@ -7,10 +7,12 @@ Caches the model in memory and reloads it only when the path changes, as determi
 e.g:
     do ##class(MLpipeline.ModelServing).Predict(X)
 */
-ClassMethod Predict(X As %SYS.Python) As %SYS.Python [ Language = python ]
+ClassMethod Predict(inputData As %String) As %SYS.Python [ Language = python ]
 {
     import iris
     import mlflow
+    import pandas as pd
+    import json
     global _cached_model, _current_path
 
     try:
@@ -28,11 +30,17 @@ ClassMethod Predict(X As %SYS.Python) As %SYS.Python [ Language = python ]
             iris._SYS.System.WriteToConsoleLog(f"New model loaded from {new_model_path}", 0, 0)
 
         iris._SYS.System.WriteToConsoleLog(f"Predicting with model from {new_model_path}", 0, 0)
-        return _cached_model.predict(X)
+        data_dict = json.loads(inputData)
+        X = pd.DataFrame(data_dict['data'], columns=data_dict['columns'])
+        preds = _cached_model.predict(X)
+        y_pred = pd.DataFrame(preds, columns=['y_pred'], index=X.index)
+        return y_pred.to_json(orient='split')
+
     except Exception as e:
-        print(f"Predict Error: {str(e)}")
-        iris._SYS.System.WriteToConsoleLog(f"Predict Error: {str(e)}", 0, 2)
-        return None
+        err_msg = f"Predict Error: {str(e)}"
+        print(f"Predict Error: {err_msg}")
+        iris._SYS.System.WriteToConsoleLog(f"Predict Error: {err_msg}", 0, 2)
+        return json.dumps({"error": err_msg})
 }
 
 }
