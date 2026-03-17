@@ -298,7 +298,9 @@ Method ModelEvaluation(model As %SYS.Python, Xtest As %SYS.Python, Ytest As %SYS
 }
 
 /*
-Validation before promoting model to production. Compares performance to a baseline metric or previous model. Returns the best model's run ID for promotion.
+Validation before promoting model to production. 
+Compares performance to a baseline metric or previous model. 
+Returns the best model's run ID for promotion.
 e.g:
     set AP = ##class(MLpipeline.AutomatedPipeline).%New()
     set df = AP.DataExtraction("2026-02-26 17:50:00")
@@ -372,61 +374,6 @@ Method ModelValidation(newmodelmetrics As %SYS.Python, result As %SYS.Python, pl
 }
 
 /*
-Updates the global containing the training model's path to be used by the ModelServing component for inference. 
-e.g:
-    set AP = ##class(MLpipeline.AutomatedPipeline).%New()
-    set newPath = "/dur/models/<run_id>"
-    set status = AP.DeployModel(newPath)
-*/
-Method DeployModel(newPath As %String) As %Status
-{
-    set ^ML.Config("ModelPath") = newPath
-    quit $$$OK
-}
-
-/*
-Contains the logic for promoting a new model to production based on the validation results. Compares the new model's performance to the current production model and decides whether to update the production model or not. Logs all decisions and actions taken during this process.
-e.g:
-    set AP = ##class(MLpipeline.AutomatedPipeline).%New()
-    set bestrunid = "run_id_of_best_model_from_validation"
-    set status = AP.PromotingLogic(bestrunid)
-*/
-Method PromotingLogic(bestrunid As %String) As %SYS.Python [ Language = python ]
-{
-    import os
-    import iris
-    import mlflow
-    try:
-        gref = iris.gref("^ML.Config")
-        active_path = gref["ModelPath"]
-        
-        candidate_model_path = os.path.join(self._GetParameter("MODELSPATH"), bestrunid)
-
-        if active_path:
-            # A model already exists. Compare performance.
-            if bestrunid == self.MLFLOWRUNID:
-                input_promote = input("New model outperforms the baseline. Promote? (yes/no): ")
-                if input_promote.lower() == "yes":
-                    self.DeployModel(candidate_model_path) 
-                    iris._SYS.System.WriteToConsoleLog(f"Model updated to: {candidate_model_path}", 0, 0)
-                else:
-                    iris._SYS.System.WriteToConsoleLog("Promotion declined. Keeping old model.", 0, 0)
-            else:
-                iris._SYS.System.WriteToConsoleLog("New model failed to beat baseline. Keeping old model.", 0, 0)
-        else:
-            # Cold start. No model in ^ML.Config.
-            iris._SYS.System.WriteToConsoleLog("No existing model found. Deploying first model.", 0, 0)
-            self.DeployModel(candidate_model_path)
-            print(f"Initial model deployed to: {candidate_model_path}")
-        return True
-
-    except Exception as e:
-        print(f"PromotingLogic Error: {str(e)}")
-        iris._SYS.System.WriteToConsoleLog(f"PromotingLogic Error: {str(e)}", 0, 2)
-        return False
-}
-
-/*
 Runs the entire ML pipeline sequentially. Handles Each component's try/except.
 e.g:
     set AP = ##class(MLpipeline.AutomatedPipeline).%New()
@@ -469,7 +416,7 @@ Method RunPipeline(datetimestr As %String) As %SYS.Python [ Language = python ]
 
         # Model Promoting process
         iris._SYS.System.WriteToConsoleLog("Starting PromotingLogic.", 0, 0)
-        self.PromotingLogic(bestrunid)
+        iris.MLpipeline.ModelServing.PromotingLogic(self.MLFLOWRUNID, bestrunid)
 
         iris._SYS.System.WriteToConsoleLog("Automated ML Pipeline execution completed.", 0, 0)
         return {

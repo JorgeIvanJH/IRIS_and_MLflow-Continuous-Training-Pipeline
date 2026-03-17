@@ -1,46 +1,61 @@
 Class MLpipeline.ModelServing Extends %RegisteredObject
 {
 
+// TODO: MEthod to download model from mlflow if doesnt exist in path
+
 /*
-Loads the model and serves it for inference. 
-Caches the model in memory and reloads it only when the path changes, as determined by a global variable.
+Updates the global containing the training model's path to be used by the PredictionService component for inference. 
 e.g:
-    do ##class(MLpipeline.ModelServing).Predict(X)
+    set status = ##class(MLpipeline.ModelServing).DeployModel("/path/to/new/model")
 */
-ClassMethod Predict(inputData As %String) As %SYS.Python [ Language = python ]
+ClassMethod DeployModel(newPath As %String) As %Status
 {
+    set ^ML.Config("ModelPath") = newPath
+    do ##class(%SYS.System).WriteToConsoleLog("Model path updated to: "_newPath, 0, 0)
+    quit $$$OK
+}
+
+/*
+Contains the logic for promoting a new model to production based on the validation results in MLpipeline.ModelValidation. 
+newrunid: is the most recent model run ID
+bestrunid: is the best performing model run ID based on validation metrics. It can be the newrunid, or the current model's run ID in production.
+^ML.Config("ModelPath"): contains the path to the weights of the current production model.
+The new run model is promoted if it outperforms the current production model, and if user approves.
+e.g:
+    set status = ##class(MLpipeline.ModelServing).PromotingLogic("b4c22ea287704278a351f934ab0038b5", "b4c22ea287704278a351f934ab0038b5")
+*/
+ClassMethod PromotingLogic(newrunid As %String, bestrunid As %String) As %SYS.Python [ Language = python ]
+{
+    import os
     import iris
     import mlflow
-    import pandas as pd
-    import json
-    global _cached_model, _current_path
-
     try:
         gref = iris.gref("^ML.Config")
-        new_model_path = gref["ModelPath"]
+        active_path = gref["ModelPath"]
+        
+        candidate_model_path = os.path.join(iris.MLpipeline.AutomatedPipeline._GetParameter("MODELSPATH"), bestrunid)
 
-        if not new_model_path:
-            iris._SYS.System.WriteToConsoleLog("No model path found in ^ML.Config('ModelPath')", 0, 2)
-            raise Exception("No model path found in ^ML.Config('ModelPath')")
-
-        # Load the model if it's not cached or if the path has changed
-        if '_cached_model' not in globals() or _current_path != new_model_path:
-            _cached_model = mlflow.sklearn.load_model(new_model_path)
-            _current_path = new_model_path
-            iris._SYS.System.WriteToConsoleLog(f"New model loaded from {new_model_path}", 0, 0)
-
-        iris._SYS.System.WriteToConsoleLog(f"Predicting with model from {new_model_path}", 0, 0)
-        data_dict = json.loads(inputData)
-        X = pd.DataFrame(data_dict['data'], columns=data_dict['columns'])
-        preds = _cached_model.predict(X)
-        y_pred = pd.DataFrame(preds, columns=['y_pred'], index=X.index)
-        return y_pred.to_json(orient='split')
+        if active_path:
+            # A model already exists. Compare performance.
+            if bestrunid == newrunid:
+                input_promote = input("New model outperforms the baseline. Promote? (yes/no): ")
+                if input_promote.lower() == "yes":
+                    iris._SYS.System.WriteToConsoleLog("Promotion approved. Deploying new model.", 0, 0)
+                    iris.MLpipeline.ModelServing.DeployModel(candidate_model_path)
+                else:
+                    iris._SYS.System.WriteToConsoleLog("Promotion declined. Keeping old model.", 0, 0)
+            else:
+                iris._SYS.System.WriteToConsoleLog("New model failed to beat baseline. Keeping old model.", 0, 0)
+        else:
+            # Cold start. No model in ^ML.Config.
+            iris._SYS.System.WriteToConsoleLog("No existing model found. Deploying first model.", 0, 0)
+            iris.MLpipeline.ModelServing.DeployModel(candidate_model_path)
+        return True
 
     except Exception as e:
-        err_msg = f"Predict Error: {str(e)}"
-        print(f"Predict Error: {err_msg}")
-        iris._SYS.System.WriteToConsoleLog(f"Predict Error: {err_msg}", 0, 2)
-        return json.dumps({"error": err_msg})
+        print(f"PromotingLogic Error: {str(e)}")
+        iris._SYS.System.WriteToConsoleLog(f"PromotingLogic Error: {str(e)}", 0, 2)
+        return False
 }
 
 }
