@@ -60,3 +60,60 @@ def plot_inference(self, Xtrain, Ytrain, Xtest, Ytest, oldrun, newrun):
     plt.grid()
     plt.savefig(f"/dur/log/model_comparison_{oldrunname}_vs_{newrunname}.png")
     plt.close()
+
+def save_mlflow_model(runid: str):
+    """
+    Loads a model from MLflow using the provided run ID and re-saves it to the path specified in the MODELSPATH parameter.
+    """
+    import iris
+    import mlflow
+    import os
+    import dotenv
+    dotenv.load_dotenv()
+
+    try:
+        iris._SYS.System.WriteToConsoleLog(f"Attempting to re-save model for Run ID: {runid}", 0, 0)
+        # Use the internal Docker network URL for the MLflow container
+        mlflow.set_tracking_uri(os.getenv("MLFLOW_TRACKING_URI_IRIS"))
+        model_uri = f"runs:/{runid}/model"
+        model = mlflow.sklearn.load_model(model_uri)
+        base_path = iris.cls("MLpipeline.AutomatedPipeline")._GetParameter("MODELSPATH")
+        model_path = os.path.join(base_path, runid)
+        mlflow.sklearn.save_model(model, path=model_path)
+        iris._SYS.System.WriteToConsoleLog(f"Model re-saved to: {model_path}", 0, 0)
+        return True
+    except Exception as e:
+        print(f"ReSaveMLflowModel Error: {str(e)}")
+        iris._SYS.System.WriteToConsoleLog(f"ReSaveMLflowModel Error: {str(e)}", 0, 2)
+        return False
+
+def safe_model_load(model_path: str):
+    """
+    Safely loads a model from the specified path. If loading fails, it attempts to re-save the model and load it again.
+    """
+    import iris
+    import mlflow
+    import os
+
+    try:
+        model = mlflow.sklearn.load_model(model_path)
+        return model
+    except Exception as e:
+        print(f"Error loading model from {model_path}: {str(e)}")
+        iris._SYS.System.WriteToConsoleLog(f"Error loading model from {model_path}: {str(e)}", 0, 2)
+        # Extract run ID from the model path and attempt to re-save the model
+        run_id = os.path.basename(model_path)
+        print(f"Attempting to re-save model for Run ID: {run_id}")
+        iris._SYS.System.WriteToConsoleLog(f"Attempting to re-save model for Run ID: {run_id}", 0, 0)
+        if save_mlflow_model(run_id):
+            try:
+                print(f"Attempting to load model again from {model_path} after re-saving.")
+                iris._SYS.System.WriteToConsoleLog(f"Attempting to load model again from {model_path} after re-saving.", 0, 0)
+                model = mlflow.sklearn.load_model(model_path)
+                return model
+            except Exception as e:
+                print(f"Error loading model after re-saving from {model_path}: {str(e)}")
+                iris._SYS.System.WriteToConsoleLog(f"Error loading model after re-saving from {model_path}: {str(e)}", 0, 2)
+                return None
+        else:
+            return None

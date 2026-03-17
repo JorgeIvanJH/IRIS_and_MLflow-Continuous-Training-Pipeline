@@ -321,7 +321,7 @@ Method ModelValidation(newmodelmetrics As %SYS.Python, result As %SYS.Python, pl
     import mlflow
     import pandas as pd
     from sklearn.metrics import mean_absolute_error, r2_score
-    from python_utils.utils import plot_inference
+    from python_utils.utils import plot_inference, safe_model_load
 
     try:
 
@@ -342,7 +342,7 @@ Method ModelValidation(newmodelmetrics As %SYS.Python, result As %SYS.Python, pl
             last_run_id = last_run["run_id"]
             last_run_name = last_run.get("tags.mlflow.runName")
             last_model_path = os.path.join(self._GetParameter("MODELSPATH"), last_run_id)
-            last_model = mlflow.sklearn.load_model(last_model_path)
+            last_model = safe_model_load(last_model_path)
             iris._SYS.System.WriteToConsoleLog(f"Last successful run found and loaded. Model Name: {last_run_name} Run ID: {last_run_id} Model Path: {last_model_path}", 0, 0)
             # Evaluate the last model on the current test set for comparison
             new_y_pred = last_model.predict(Xtest)

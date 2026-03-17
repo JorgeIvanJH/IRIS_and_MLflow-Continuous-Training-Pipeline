@@ -13,6 +13,8 @@ ClassMethod Predict(inputData As %String) As %SYS.Python [ Language = python ]
     import mlflow
     import pandas as pd
     import json
+    from python_utils.utils import safe_model_load
+
     global _cached_model, _current_path
 
     try:
@@ -25,7 +27,7 @@ ClassMethod Predict(inputData As %String) As %SYS.Python [ Language = python ]
 
         # Load the model if it's not cached or if the path has changed
         if '_cached_model' not in globals() or _current_path != new_model_path:
-            _cached_model = mlflow.sklearn.load_model(new_model_path)
+            _cached_model = safe_model_load(new_model_path)
             _current_path = new_model_path
             iris._SYS.System.WriteToConsoleLog(f"New model loaded from {new_model_path}", 0, 0)
 
