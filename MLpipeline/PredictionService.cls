@@ -62,31 +62,31 @@ ClassMethod CachedModelLoading() As %SYS.Python [ Language = python ]
 /*
 Uploads a CSV file to an IRIS table. It performs basic validation and type inference, including date parsing.
 */
-ClassMethod SavePredictions(predictionlist As %List, namespace As %String = "USER", package As %String = "MLpipeline") As %Status [ Language = python ]
+ClassMethod SavePredictions(model As %SYS.Python, indf As %SYS.Python, ypreds As %SYS.Python, predtime As %Double, namespace As %String = "USER", package As %String = "MLpipeline") As %Status [ Language = python ]
 {
     from sqlalchemy import create_engine
     import pandas as pd
     import iris
     
     try:
-        # Standard columns defined in your table creation
-        cols = ['PointsIDForeignKey', 'YPred', 'Modelrunid', 'metrics']
-        
-        # Convert incoming data to DataFrame
-        # Assumes predictionlist is a list of dicts: [{'PointsIDForeignKey': 1, 'YPred': 0.5, ...}, ...]
-        # Or a list of lists: [[1, 0.5, 'run_1', '{}'], ...]
-        df = pd.DataFrame(predictionlist)
-        
-        # If passed as a list of lists without keys, ensure column names match
-        if not isinstance(predictionlist[0], dict):
-            df.columns = cols
-            
+
         engine = create_engine(f"iris+emb:///{namespace}")
-        
+
+        numrows, numcols = indf.shape
+
+        df_save = pd.DataFrame({})
+        # df_save["ID"] will be auto-generated in IRIS as an identity column
+        df_save["PointsIDForeignKey"] = indf["id"]
+        df_save["YPred"] = ypreds
+        df_save["Modelrunid"] = model._mlflow_run_id if hasattr(model, '_mlflow_run_id') else "not_available"
+        df_save["MAE"] = abs(indf["y"] - ypreds)
+        df_save["InferenceTime"] = predtime/numrows if numrows > 0 else 0
+        # df_save["datetime"] populated by default in IRIS with CURRENT_TIMESTAMP
+
         # Append data to the existing table
-        df.to_sql("Predictions", engine, schema=package, if_exists='append', index=False, method='multi')
+        df_save.to_sql("Predictions", engine, schema=package, if_exists='append', index=False, method='multi')
         
-        iris._SYS.System.WriteToConsoleLog(f"Successfully saved {len(df)} predictions to {package}.Predictions", 0, 0)
+        iris._SYS.System.WriteToConsoleLog(f"Successfully saved {numrows} predictions to {package}.Predictions", 0, 0)
         return True
 
     except Exception as e:
@@ -103,30 +103,24 @@ e.g:
 ClassMethod Predict(filters As %String = "") As %SYS.Python [ Language = python ]
 {
     import iris
-    import mlflow
-    import json
-    import pandas as pd
     from python_utils.utils import measure_time_decorator
 
+
     try:
-
-        df = iris.MLpipeline.PredictionService.PredDataExtraction(filters=filters)
+        iris._SYS.System.WriteToConsoleLog(f"Starting prediction with filters: {filters}", 0, 0)
+        indf = iris.MLpipeline.PredictionService.PredDataExtraction(filters=filters)
         model = iris.MLpipeline.PredictionService.CachedModelLoading()
-        X = df[["x"]]
-        y_preds = model.predict(X)
-        y_pred = pd.DataFrame(y_preds, columns=['y_pred'], index=X.index)
-
-        iris.MLpipeline.PredictionService.SavePredictions(
-            predictionlist=y_pred.reset_index().to_dict(orient='records')
-        )
-
-        return y_pred.to_json(orient='split')
+        decorated_predict = measure_time_decorator(model.predict)
+        y_preds, pred_time = decorated_predict(indf[["x"]])
+        iris.MLpipeline.PredictionService.SavePredictions(model, indf, y_preds, pred_time)
+        iris._SYS.System.WriteToConsoleLog(f"Prediction completed in {pred_time:.4f} seconds for {len(indf)} records.", 0, 0)
+        return y_preds
 
     except Exception as e:
         err_msg = f"Predict Error: {str(e)}"
         print(f"Predict Error: {err_msg}")
         iris._SYS.System.WriteToConsoleLog(f"Predict Error: {err_msg}", 0, 2)
-        return json.dumps({"error": err_msg})
+        return [None]
 }
 
 }
