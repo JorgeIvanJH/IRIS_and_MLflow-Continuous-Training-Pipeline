@@ -53,6 +53,8 @@ def plot_inference(self, Xtrain, Ytrain, Xtest, Ytest, oldrun, newrun):
         plt.scatter(Xtest, Ytest, color="blue", label="Test Data")
     plt.plot(line_x, line_y_old, color="red", label=f"Old Model: {oldrunname}")
     plt.plot(line_x, line_y_new, color="green", label=f"New Model: {newrunname}")
+    plt.xlim(0, 200)
+    plt.ylim(0, 200)
     plt.xlabel("x")
     plt.ylabel("y")
     plt.title("Model Comparison")

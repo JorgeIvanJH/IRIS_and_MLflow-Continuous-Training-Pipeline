@@ -282,6 +282,8 @@ Method ModelEvaluation(model As %SYS.Python, Xtest As %SYS.Python, Ytest As %SYS
     def custom_plot(eval_df, builtin_metrics, artifacts_dir):
         """placeholder for a custom plotting function to be logged later"""
         plt.figure(figsize=(6, 6))
+        plt.xlim(0, 200)
+        plt.ylim(0, 200)
         plt.scatter(eval_df["target"], eval_df["prediction"], alpha=0.5)
         plt.plot([eval_df["target"].min(), eval_df["target"].max()], [eval_df["target"].min(), eval_df["target"].max()], 'r--')
         plt.xlabel("True Values")

@@ -74,7 +74,7 @@ We will delve in to the details later, but for early understanding of each of th
 
 ## Docker Details
 
-### docker-compose.yml
+### [docker-compose.yml](docker-compose.yml)
 
 has service for iris, and the backend that mlflow needs for model registry and performance tracking (MLflow server, Postgres, and MinIO).All MLflow-related state (metadata and artifacts such as models and metrics) is stored in the durable host-mounted directory dur/sandbox/mlflow.,Because this directory resides in the host filesystem and is bind-mounted, its contents persist across container restarts and are accessible outside the containers.
 
@@ -88,24 +88,43 @@ mlflow server --port 5000
 
 then you can Open http://localhost:5000 in your browser to view the UI.
 
-### dockerfile
+### [dockerfile](dockerfile)
 
 contains image requirements for IRIS with any needed configurations for Data Science projects (borrowed from https://github.com/JorgeIvanJH/IRIS-dockerization-for-Data-Science) for embedded python
 
-### iris_autoconf.sh
+### [iris_autoconf.sh](iris_autoconf.sh)
 
 Contains all iris terminal comands to be executed after the container is up and running. This imports  objectscript packages, defines default username (SuperUser) and password (SYS) avoiding default password changing, populates initial tables, trains first model, deplots first model to production, makes first monitoring, and sets up structured logging to save logs related to this project to the persistent storage in dur\log\MLpipelineLogs.log
 
 
-## Experimentation framework (MLflow Tracking)
 
-MLflow Tracking is the component of MLflow for data scientists who train traditional machine learning models. It keeps track of model performance metrics, saves weights in a standard manner, logs hyperparameters, and much more. All this information is saved locally (in this repo), and dashboards, metrics and all info related to the model development of interest for data scientists can be easily consulted just by going to http://localhost:5000 in any web explorer.
 
-Codewise only a couple of additional lines of code are added to the python script or jupyter notebook to link training progress to be stored in this platform.
+## Logging
+This repo uses [Structured Logging](https://docs.intersystems.com/irislatest/csp/docbook/DocBook.UI.Page.cls?KEY=GCM_structuredlog) to log every relevant aspect of the operational health of the CT pipeline. The configuration set on the iris_autoconf.sh file to keep for the "INFO" level, only "Utility.Event" events creates with the form
 
-Example: 
+do ##class(%SYS.System).WriteToConsoleLog(message, prefix, severity)
 
-In this example we only require 2 additional lines (besides import mlflow of course) to keep track of the experimentations for my LightGbm model over one popular sklearn's public dataset:
+e.g:
+    do ##class(%SYS.System).WriteToConsoleLog("This is my INFO CT Log", 0, 0)
+    do ##class(%SYS.System).WriteToConsoleLog("This is my WARNING CT Log", 0, 1)
+    do ##class(%SYS.System).WriteToConsoleLog("This is my SEVERE CT Log", 0, 2)
+
+This logging system is used throughout the whole pipeline for auditing purposes, and though all these logs can be seen in the managemente portal at System Operation > System Logs > Messages Log, the configuration done during the docker build, lets us have a persistent version at [/dur/log/MLpipelineLogs.log](/dur/log/MLpipelineLogs.log), observable outside of the container, and in  JSON format for compatibility and any time analysis.
+
+
+## Implementation Details
+
+Below we explain, where and how is each of the CT pipeline components implemented in this repo.
+
+
+### Experimentation
+
+![alt text](images/Experimentation.png)
+
+
+This phase refers to any experimentation done to train a first model using the data intially available from the Feature Store. For this project this block is represented in the jupyter notebook in [dur\sandbox\experiment.ipynb](dur/sandbox/experiment.ipynb), where we query the points available initially in the database, fit a first model, and compute performance metrics that we upload into a sepparate experiment in MLflow.
+
+In the example just mentioned above we fit a sklearn linear regression on some points, and use a "with" clouse to log the whole training, model and metrics to MLflow. But for easier firt-time experimentation, also with models outside of sklearn you can connect MLflow to your experimentation just as shown below for a more complex dataset used to fit a LightGBM model, just by adding 2 additional lines of code:
 
 ```python
 import os
@@ -125,20 +144,13 @@ mlflow.set_tracking_uri(os.environ["MLFLOW_TRACKING_URI"])
 mlflow.set_experiment("MyLightGMB-experimentation") # 1: name of the experiment to identify in the UI
 
 X, y = datasets.fetch_california_housing(return_X_y=True)
-X_train, X_test, y_train, y_test = train_test_split(
-    X, y, test_size=0.2, random_state=42
-)
-params = {
-    "n_estimators": 20,
-    "learning_rate": 0.1,
-    "max_depth": 50,
-    "random_state": 42,
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+params = {"n_estimators": 20, "learning_rate": 0.1, "max_depth": 50,"random_state": 42,
 }
 mlflow.lightgbm.autolog() # 2: Enable LightGBM autologging (would change for other libraries)
 
 model = lgb.LGBMRegressor(**params)
 model.fit(X_train, y_train, eval_set=[(X_test, y_test)], eval_metric="rmse")
-
 ```
 
 And just like that we have full traceability of all the experiments we carry on. See below a short execise varying the number of extimators and max depth to reduce the rmse
@@ -149,41 +161,30 @@ Clicking each experiment, we can see more details, such as the training curve
 
 ![alt text](images/MLflow_experiment_learn_curve.png)
 
-Quickstart for Data Scientists: https://mlflow.org/docs/latest/ml/getting-started/quickstart/
+Follow the code in [dur/tests/test_mlflow_connection.py](dur/tests/test_mlflow_connection.py) to verify the connection to MLflow.
+
+You can load previously trained models, whose artifacts are stored in MLflow's Artifact store, by using the run id as done in [dur/tests/test_mlflow_loadmodel.py](dur/tests/test_mlflow_loadmodel.py). Note: This process takes some time, which is why in our implementation we also manually store the model weights for faster future loading.
+
+For more information check the Quickstart for Data Scientists: https://mlflow.org/docs/latest/ml/getting-started/quickstart/
 
 Guide for automatic hyperparameter optimization using optuna, and mlflow for tracking: https://mlflow.org/docs/latest/ml/getting-started/hyperparameter-tuning/
 
-Run python dur\sandbox\test_train.py to train and see performance tracking, and dur\sandbox\test_load.py to know how to load the resulting model based on the Run ID from the experiment desired (TODO: see why it takes so long).
 
-
-## Logging
-This repo uses Structured Logging (https://docs.intersystems.com/irislatest/csp/docbook/DocBook.UI.Page.cls?KEY=GCM_structuredlog) to log every relevant aspect of the operational health of the CT pipeline. The configuration set on the iris_autoconf.sh file to keep for the "INFO" level, only "Utility.Event" events creates with the form
-
-do ##class(%SYS.System).WriteToConsoleLog(message, prefix, severity)
-
-e.g:
-    do ##class(%SYS.System).WriteToConsoleLog("This is my INFO CT Log", 0, 0)
-    do ##class(%SYS.System).WriteToConsoleLog("This is my WARNING CT Log", 0, 1)
-    do ##class(%SYS.System).WriteToConsoleLog("This is my SEVERE CT Log", 0, 2)
-
-This logging system is used throughout the whole pipeline for auditing purposes, and though all these logs can be seen in the managemente portal at System Operation > System Logs > Messages Log, the configuration done during the docker build, lets us have a persistent version at /dur/log/MLpipelineLogs.log, observable outside of the container, and in  JSON format for compatibility and any time analysis.
-
-## Feature Store
+### Feature Store
 
 ![alt text](images/Feature_Store.png)
 
-Implemented in MLpipeline\FeatureStore.cls, there we define as Parameters of the MLpipeline.FeatureStor class any constant pertinent to the data itself to be easily referenced, and also the methods to upload and query all the tables required for the project. 
+Implemented in [MLpipeline\FeatureStore.cls](MLpipeline\FeatureStore.cls), there we define as Parameters of the MLpipeline.FeatureStor class any constant pertinent to the data itself to be easily referenced, and also the methods to upload and query all the tables required for the project. 
 
 The MLpipeline.PointSample and MLpipeline.Predictions persistent classes point to the IRIS tables storing the raw data, and relevant metadata about the predictions done by the model
 
-
 In this repo we include the required methods for querying from DB, and Parameterts (unchangeable at runtime) are set in stone here.
 
-## Automated Pipeline
+### Automated Pipeline
 
 ![alt text](images/Automated_Pipeline.png)
 
-Implemented in MLpipeline\AutomatedPipeline.cls, there we define as Parameters of the MLpipeline.FeatureStor class any constant pertinent to the model itself to be easily referenced, and also one method for each of the components that it involves, that are executed through the RunPipeline method in the same class. These steps are described in detail below:
+Implemented in [MLpipeline\AutomatedPipeline.cls](MLpipeline\AutomatedPipeline.cls), there we define as Parameters of the MLpipeline.FeatureStor class any constant pertinent to the model itself to be easily referenced, and also one method for each of the components that it involves, that are executed through the RunPipeline method in the same class. These steps are described in detail below:
 
 1) ```Method DataExtraction(datetimestr As %String)```:
 Leverages the FeatureStore to query the PointSamples table filtered by a takins all samples a certain datetime threshold using IRIS SQL, and converts the resulting %SYS.Python.SQLResultSet into a pandas DataFrame.
@@ -221,38 +222,23 @@ Fetches the current model deployed in production and compares its performance to
  - Process: Compares performance between new and on-production models, draws inference plots.
  - Out: run_id of best model
 
-## Model Serving
+### Model Serving
 
 ![alt text](images\Model_Serving.png)
 
-Implemented in MLpipeline\ModelServing.cls, there we have methods to promote the model to production, according to the MLflow run id with the best performance on the selected metrics. The promotion is done by overwriting the path to the weights of the model that is stored on the global ```^ML.Config("ModelPath")```
+Implemented in [MLpipeline\ModelServing.cls](MLpipeline\ModelServing.cls), there we have methods to promote the model to production, according to the MLflow run id with the best performance on the selected metrics. The promotion is done by overwriting the path to the weights of the model that is stored on the global ```^ML.Config("ModelPath")```
 
 
-## Prediction Service
+### Prediction Service
 
 ![alt text](images\Prediction_Service.png)
 
-Implemented in MLpipeline\PredictionService.cls, the Predict method takes in any filters for which a prediction want's to me made with the current model in production. This filters are used to extract the values from database, and over which the prediction is done. The resulting prediction, along with other metedata of interest (modelrunid, inference time, datetime of inference) is stored in a table containing all this information for each of the points in the raw data table to which it is connected using foreign keys.
+Implemented in [MLpipeline\PredictionService.cls](MLpipeline\PredictionService.cls), the Predict method takes in any filters for which a prediction want's to me made with the current model in production. This filters are used to extract the values from database, and over which the prediction is done. The resulting prediction, along with other metedata of interest (modelrunid, inference time, datetime of inference) is stored in a table containing all this information for each of the points in the raw data table to which it is connected using foreign keys.
 
-## Performance Monitoring and Trigger
+### Performance Monitoring and Trigger
 
 ![alt text](images\Performance_Monitoring.png)
 ![alt text](images\Trigger.png)
 
-Implemented in MLpipeline\PerformanceMonitoring.cls, there we query both the source data tables and the predictions tables, we filter the source rows that have ground truth in it, and use it along with the predictions made by the model to compute performance metrics that we log directly to a separate Experiment exclusively for live monitoring in MLflow. the ```Trigger(r2 as %Numeric)``` method is what directly executed the automated pipeline whe the performance of the model falls below a predefined threshold.
+Implemented in [MLpipeline\PerformanceMonitoring.cls](MLpipeline\PerformanceMonitoring.cls), there we query both the source data tables and the predictions tables, we filter the source rows that have ground truth in it, and use it along with the predictions made by the model to compute performance metrics that we log directly to a separate Experiment exclusively for live monitoring in MLflow. the ```Trigger(r2 as %Numeric)``` method is what directly executed the automated pipeline whe the performance of the model falls below a predefined threshold.
 
-
-
-
-
-
-Automatic Pipeline Flow:
-
-
-
-Trigger: Manual (can be on new data, or on a schedule, or on model degradation, etc)
-
-TODO: Improve docstring as writing documentation
-
-
-docker exec -it iris-experimentation iris terminal iris

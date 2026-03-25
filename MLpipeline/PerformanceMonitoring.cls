@@ -125,8 +125,9 @@ Method MetricsMonitoring(fromdatetime As %String) As %Status [ Language = python
         modelnames = [col for col in merged_df.columns if col not in PointSamples_df.columns]
         fig, ax = plt.subplots(figsize=(12, 6))
         for colname in modelnames + ["y"]:
-            sns.lineplot(data=merged_df, x="x", y=colname, label=str(colname), ax=ax)
-
+            sns.scatterplot(data=merged_df, x="x", y=colname, label=str(colname), ax=ax)
+        ax.set_xlim(0, 200)
+        ax.set_ylim(0, 200)
         ax.set_title("Predictions Over Time by Model Run")
         ax.set_xlabel("Datetime")
         ax.set_ylabel("Y")
