@@ -20,18 +20,15 @@ Play with the jupyter notebook in [dur/tests/CT_Pipeline_testing.ipynb](dur/test
 
 Note: in order for the point-drawing widget to work, before running the following cells, click outside of the widget and then draw one last point inside it.
 
-See logged metrics and model registry in
+See logged metrics and model registry in [http://localhost:5000/#/experiments](http://localhost:5000/#/experiments)
 
-```
-http://localhost:5000/#/experiments
-```
+Access IRIS Management Portal in 
+[http://localhost:52773/csp/sys/%25CSP.Portal.Home.zen](http://localhost:52773/csp/sys/%25CSP.Portal.Home.zen)
 
-Access IRIS Management Portal in
-```
-http://localhost:52773/csp/sys/%25CSP.Portal.Home.zen
-username: SuperUser
-password: SYS
-```
+with credentials:
+
+- username: SuperUser
+- password: SYS
 
 See all the logging exclusive to the pipeline in dur/log/MLpipelineLogs.log
 

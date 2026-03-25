@@ -385,7 +385,7 @@ Method ModelValidation(newmodelmetrics As %SYS.Python, result As %SYS.Python, pl
             prod_run_id = prod_model_path.name # file name of each saved model is the run id
             prodmodel_run = mlflow.get_run(prod_run_id)
             prod_model = safe_model_load(prod_model_path)
-            iris._SYS.System.WriteToConsoleLog(f"Current model in production found and loaded. Model Path: {prod_model_path}. Run Name: {prodmodel_run.get('tags.mlflow.runName')}", 0, 0)
+            iris._SYS.System.WriteToConsoleLog(f"Current model in production found and loaded. Model Path: {prod_model_path}. Run Name: {prodmodel_run.data.tags.get('mlflow.runName')}", 0, 0)
             # Evaluate the model currently in production on the new test set for comparison
             prod_y_pred = prod_model.predict(Xtest)
             mae = mean_absolute_error(Ytest, prod_y_pred)
@@ -401,7 +401,6 @@ Method ModelValidation(newmodelmetrics As %SYS.Python, result As %SYS.Python, pl
                 iris._SYS.System.WriteToConsoleLog("New model does not outperform the model in production, model in production is kept.", 0, 0)
                 best_run_id = prod_run_id
             if plotComparison:
-                current_run = runs[runs["run_id"] == self.MLFLOWRUNID].iloc[0]
                 plot_inference(self, Xtrain, Ytrain, Xtest, Ytest, prodmodel_run, newmodel_run)
         else:
             print("No previous successful run found.")

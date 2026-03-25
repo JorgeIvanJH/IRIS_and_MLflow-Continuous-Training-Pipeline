@@ -84,9 +84,9 @@ Method FetchTables(fromdatetime As %String) As %SYS.Python [ Language = python ]
 Triggers the retraining pipeline if performance degradation is detected based on the R2 score.
 e.g:
     set PM = ##class(MLpipeline.PerformanceMonitoring).%New()
-    set status = PM.Trigger(0.15)
+    set status = PM.Trigger(0.15, "2026-02-26 17:50:00")
 */
-Method Trigger(r2 as %Numeric) As %Status [ Language = python ]
+Method Trigger(r2 as %Numeric, fromdatetime As %String) As %Status [ Language = python ]
 {
     import iris
     minr2threshold = float(iris.cls(__name__)._GetParameter("R2THRESHOLD"))
@@ -161,7 +161,7 @@ Method MetricsMonitoring(fromdatetime As %String) As %Status [ Language = python
             mlflow.log_figure(fig, "plots/performance_monitoring.png")
             plt.close(fig)
 
-        self.Trigger(r2) # Trigger retraining if performance degradation is detected
+        self.Trigger(r2, fromdatetime) # Trigger retraining if performance degradation is detected
 
         return True
 

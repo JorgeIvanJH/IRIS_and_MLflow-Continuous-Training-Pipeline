@@ -4,8 +4,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 import mlflow
 import pandas as pd
-import lightgbm as lgb
 import time
+import iris
 
 
 def measure_time_decorator(func):
@@ -33,35 +33,39 @@ def plot_inference(self, Xtrain, Ytrain, Xtest, Ytest, oldrun, newrun):
         oldrun (mlflow.entities.Run): The MLflow run object for the old model.
         newrun (mlflow.entities.Run): The MLflow run object for the new model.
     """
-    oldrunname = oldrun.get("tags.mlflow.runName")
-    newrunname = newrun.get("tags.mlflow.runName")
+    try:
+        oldrunname = oldrun.data.tags.get("mlflow.runName")
+        newrunname = newrun.data.tags.get("mlflow.runName")
 
-    oldmodel = mlflow.sklearn.load_model(
-        os.path.join(eval("""self._GetParameter("MODELSPATH")"""), oldrun.run_id)
-    )
-    newmodel = mlflow.sklearn.load_model(
-        os.path.join(eval("""self._GetParameter("MODELSPATH")"""), newrun.run_id)
-    )
+        oldmodel = mlflow.sklearn.load_model(
+            os.path.join(eval("""self._GetParameter("MODELSPATH")"""), oldrun.info.run_id)
+        )
+        newmodel = mlflow.sklearn.load_model(
+            os.path.join(eval("""self._GetParameter("MODELSPATH")"""), newrun.info.run_id)
+        )
 
-    line_x = np.linspace(Xtest.min(), Xtest.max(), 100).reshape(-1, 1)
-    line_y_old = oldmodel.predict(line_x)
-    line_y_new = newmodel.predict(line_x)
-    plt.figure(figsize=(10, 6))
-    if not Xtrain.empty and not Ytrain.empty:
-        plt.scatter(Xtrain, Ytrain, color="orange", label="Train Data")
-    if not Xtest.empty and not Ytest.empty:
-        plt.scatter(Xtest, Ytest, color="blue", label="Test Data")
-    plt.plot(line_x, line_y_old, color="red", label=f"Old Model: {oldrunname}")
-    plt.plot(line_x, line_y_new, color="green", label=f"New Model: {newrunname}")
-    plt.xlim(0, 200)
-    plt.ylim(0, 200)
-    plt.xlabel("x")
-    plt.ylabel("y")
-    plt.title("Model Comparison")
-    plt.legend()
-    plt.grid()
-    plt.savefig(f"/dur/log/model_comparison_{oldrunname}_vs_{newrunname}.png")
-    plt.close()
+        line_x = np.linspace(Xtest.min(), Xtest.max(), 100).reshape(-1, 1)
+        line_y_old = oldmodel.predict(line_x)
+        line_y_new = newmodel.predict(line_x)
+        plt.figure(figsize=(10, 6))
+        if not Xtrain.empty and not Ytrain.empty:
+            plt.scatter(Xtrain, Ytrain, color="orange", label="Train Data")
+        if not Xtest.empty and not Ytest.empty:
+            plt.scatter(Xtest, Ytest, color="blue", label="Test Data")
+        plt.plot(line_x, line_y_old, color="red", label=f"Old Model: {oldrunname}")
+        plt.plot(line_x, line_y_new, color="green", label=f"New Model: {newrunname}")
+        plt.xlim(0, 200)
+        plt.ylim(0, 200)
+        plt.xlabel("x")
+        plt.ylabel("y")
+        plt.title("Model Comparison")
+        plt.legend()
+        plt.grid()
+        plt.savefig(f"/dur/log/model_comparison_{oldrunname}_vs_{newrunname}.png")
+        plt.close()
+    except Exception as e:
+        print(f"plot_inference Error: {str(e)}")
+        iris._SYS.System.WriteToConsoleLog(f"Error in plot_inference: {str(e)}", 0, 2)
 
 def save_mlflow_model(runid: str):
     """
