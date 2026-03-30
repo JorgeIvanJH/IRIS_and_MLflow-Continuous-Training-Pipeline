@@ -2,6 +2,7 @@ dur/sandbox/mlflow
 .vscode
 *.csv
 *.txt
+!requirements.txt
 !dur/models/LightGBM_1620_22122025.txt
 !dur/data/point_samples.csv
 __pycache__/
