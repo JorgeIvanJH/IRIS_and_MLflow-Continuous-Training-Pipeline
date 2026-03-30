@@ -34,7 +34,7 @@ with credentials:
 
 See all the logging exclusive to the pipeline in dur/log/MLpipelineLogs.log
 
-TODO: video showing how to execute.
+Demo: https://youtu.be/qLdc4jhn83c
 
 ## Unit Tests
 
