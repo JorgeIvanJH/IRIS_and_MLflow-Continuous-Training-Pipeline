@@ -33,7 +33,7 @@ Method UploadCSVtoIRIS(csvpath As %String, namespace As %String, package As %Str
             x DOUBLE,
             y DOUBLE,
             label VARCHAR(50),
-            datetime DATETIME
+            datetime DATETIME DEFAULT CURRENT_TIMESTAMP
         )
         """
         

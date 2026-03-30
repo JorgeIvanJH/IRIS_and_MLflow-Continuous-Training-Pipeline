@@ -11,7 +11,8 @@ services:
     ports:
       - "1972:1972"    # SuperServer port
       - "52773:52773"  # Management Portal/Web Gateway
-    # environment:
+    environment:
+      TZ: ${TZ}
     #   - ISC_DATA_DIRECTORY=/dur/iconfig  # Data directory inside the container (outside install dir)
     volumes:
       - ./dur/.:/dur:rw # map with read-write permissions
@@ -31,6 +32,7 @@ services:
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_DB: ${POSTGRES_DB}
+      TZ: ${TZ}
     volumes:
       - ./dur/sandbox/mlflow/postgres:/var/lib/postgresql/data:rw
     ports:
@@ -47,6 +49,7 @@ services:
     environment:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER}
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+      TZ: ${TZ}
     volumes:
       - ./dur/sandbox/mlflow/minio:/data:rw
     command: server /data --console-address ":9001"
@@ -62,6 +65,8 @@ services:
   create-bucket:
     image: minio/mc:latest
     container_name: mlflow-create-bucket
+    environment:
+      TZ: ${TZ}
     depends_on:
       minio:
         condition: service_healthy
@@ -95,6 +100,7 @@ services:
       MLFLOW_S3_IGNORE_TLS: "true"
       MLFLOW_HOST: ${MLFLOW_HOST}
       MLFLOW_PORT: ${MLFLOW_PORT}
+      TZ: ${TZ}
     command:
       - /bin/bash
       - -c

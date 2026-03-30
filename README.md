@@ -20,6 +20,8 @@ Play with the jupyter notebook in [dur/tests/CT_Pipeline_testing.ipynb](dur/test
 
 Note: in order for the point-drawing widget to work, before running the following cells, click outside of the widget and then draw one last point inside it.
 
+Warning: Use os.getenv("TZ") for all datetime objects to match the Docker environment. When querying IRIS, strip the timezone offset (use .strftime("%Y-%m-%d %H:%M:%S")) to avoid SQL validation errors.
+
 See logged metrics and model registry in [http://localhost:5000/#/experiments](http://localhost:5000/#/experiments)
 
 Access IRIS Management Portal in 
