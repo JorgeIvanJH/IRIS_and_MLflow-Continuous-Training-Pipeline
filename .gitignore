@@ -11,7 +11,7 @@ __pycache__/
 *.log
 dur/models/*
 dur/log/*
-
+!dur/log/MLpipelineLogs.log
 # Python test/cache artifacts
 .pytest_cache/
 .coverage

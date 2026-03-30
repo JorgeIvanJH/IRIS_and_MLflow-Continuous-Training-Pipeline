@@ -7,6 +7,11 @@ This is a formal implementation of the CT pipeline for a toy example: you manual
 ![alt text](images/points1.png)
 ![alt text](images/points2.png)
 
+## Requirements
+
+- Docker desktop
+- Notebook tested with Python 3.12
+
 ## Test The Whole CT pipeline By:
 
 
