@@ -41,6 +41,11 @@ COPY MLpipeline /usr/irissys/mgr/MLpipeline
 COPY iris_autoconf.sh /usr/irissys/iris_autoconf.sh
 RUN sed -i 's/\r$//' /usr/irissys/iris_autoconf.sh && chmod +x /usr/irissys/iris_autoconf.sh
 
+# Set the license key file path (adjust if your key is in a subfolder)
+COPY --chown=${ISC_PACKAGE_MGRUSER}:${ISC_PACKAGE_IRISGROUP} iris.key /usr/irissys/mgr/iris.key
+# Ensure the file has appropriate permissions
+RUN chmod 644 /usr/irissys/mgr/iris.key
+
 # Switch back to the default `irisowner` user
 USER irisowner
 
