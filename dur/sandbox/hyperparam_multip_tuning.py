@@ -6,7 +6,6 @@ import lightgbm as lgb
 import multiprocessing as mp
 import mlflow
 import mlflow.lightgbm
-from mlflow.optuna.storage import MlflowStorage
 from mlflow.models import infer_signature
 import numpy as np
 from sklearn.model_selection import cross_val_score, KFold
@@ -16,8 +15,11 @@ import datetime as dt
 
 dotenv.load_dotenv()
 
+STORAGE_URL = "sqlite:///optuna_lgbm.db"  # for local testing
+
+
 # Hyperparameter tuning configuration
-NUM_WORKERS = min(2, mp.cpu_count())
+NUM_WORKERS = min(16, mp.cpu_count())
 NUM_TRIALS_PER_WORKER = 5
 BASE_SEED = 42
 NUM_CV_SPLITS = 3
@@ -67,9 +69,9 @@ def objective(trial):
         crossval_score = scores.mean()
 
         # Log current trial's error metric
-        mlflow.log_metrics({"Cross-Validation Error": crossval_score})
+        mlflow.log_metrics({"cv_mse_mean": crossval_score})
         for fold_idx, score in enumerate(scores):
-            mlflow.log_metric(f"Fold_{fold_idx}_Error", score)
+            mlflow.log_metric(f"fold_{fold_idx}_mse", score)
 
         # Make it easy to retrieve the best-performing child run later
         trial.set_user_attr("run_id", child_run.info.run_id)
@@ -81,12 +83,11 @@ def run_worker(args):
     worker_id, study_name, experiment_id, parent_run_id = args
     mlflow.set_tracking_uri(os.getenv("MLFLOW_TRACKING_URI"))
     mlflow.set_experiment(EXPERIMENT_NAME)
-    storage = MlflowStorage(experiment_id=experiment_id)
     os.environ["MLFLOW_PARENT_RUN_ID"] = parent_run_id
 
     study = optuna.load_study(
         study_name=study_name,
-        storage=storage,
+        storage=STORAGE_URL,
         sampler=optuna.samplers.TPESampler(seed=BASE_SEED+worker_id),
         )
     study.optimize(
@@ -109,7 +110,6 @@ if __name__ == "__main__":
     mlflow.set_experiment(EXPERIMENT_NAME)
     experiment = mlflow.get_experiment_by_name(EXPERIMENT_NAME)
     experiment_id = experiment.experiment_id
-    mlflow_storage = MlflowStorage(experiment_id=experiment_id)
 
 
     with mlflow.start_run(run_name=RUN_NAME, log_system_metrics=True) as parent_run:
@@ -119,8 +119,8 @@ if __name__ == "__main__":
         optuna.create_study(
             direction="minimize",
             study_name=STUDY_NAME,
-            storage=mlflow_storage,
-            load_if_exists=True, # TODO: TRY FALSE
+            storage=STORAGE_URL,
+            load_if_exists=False,
         )
 
         mlflow.log_params({
@@ -131,9 +131,6 @@ if __name__ == "__main__":
             "study_name": STUDY_NAME,
         })
 
-
-
-        print("STUDY_NAME1:", STUDY_NAME)
         worker_args = [
             (worker_id, STUDY_NAME, experiment_id, parent_run_id)
             for worker_id in range(NUM_WORKERS)
@@ -143,7 +140,7 @@ if __name__ == "__main__":
 
         study = optuna.load_study(
             study_name=STUDY_NAME,
-            storage=mlflow_storage,
+            storage=STORAGE_URL,
         )
 
         best_params = study.best_trial.params
@@ -164,7 +161,8 @@ if __name__ == "__main__":
             n_jobs=1,
         )
         final_model.fit(X, y)
-        signature = infer_signature(X.sample(100), final_model.predict(X.sample(100)))
+        input_sample = X.sample(100, random_state=BASE_SEED)
+        signature = infer_signature(input_sample, final_model.predict(input_sample))
         mlflow.lightgbm.log_model(
             lgb_model=final_model,
             name="best_model",
