@@ -1,3 +1,4 @@
+# TODO: 1. name experiment and rparent run. 2. duplocate parent runs. 3. failing after 3 or more workers, 4
 import os
 import dotenv
 import optuna
@@ -6,34 +7,28 @@ import multiprocessing as mp
 import mlflow
 import mlflow.lightgbm
 from mlflow.optuna.storage import MlflowStorage
-import numpy as np
-
 from mlflow.models import infer_signature
+import numpy as np
 from sklearn.model_selection import cross_val_score, KFold
 from sklearn.datasets import fetch_california_housing
 from sklearn.metrics import make_scorer, mean_squared_error
-from mlflow.models import infer_signature
+import datetime as dt
 
 dotenv.load_dotenv()
 
-NUM_WORKERS = min(3, mp.cpu_count())
-NUM_TRIALS_PER_WORKER = 20
-STUDY_NAME = "lightgbm_california_housing"
+# Hyperparameter tuning configuration
+NUM_WORKERS = min(2, mp.cpu_count())
+NUM_TRIALS_PER_WORKER = 5
 BASE_SEED = 42
+NUM_CV_SPLITS = 3
+EXPERIMENT_NAME = "LightGBM Hyperparameter Tuning with Optuna and MLflow"
+crossvalstrategy = KFold(n_splits=NUM_CV_SPLITS, shuffle=True, random_state=BASE_SEED)
+optunasampler = optuna.samplers.TPESampler(seed=BASE_SEED)
 
-tracking_uri = os.getenv("MLFLOW_TRACKING_URI")
-
-mlflow.set_tracking_uri(tracking_uri)
-mlflow.set_experiment("Hyperparameter Tuning Experiment")
-
+# Load dataset
 X, y = fetch_california_housing(return_X_y=True, as_frame=True)
 X.columns = [col.replace(" ", "_") for col in X.columns]
 y.name = "median_house_value"
-
-crossvalstrategy = KFold(n_splits=3, shuffle=True, random_state=BASE_SEED)
-crossvalstrategy = KFold(n_splits=3, shuffle=True, random_state=BASE_SEED)
-
-
 
 def objective(trial):
     params = {
@@ -53,7 +48,8 @@ def objective(trial):
     with mlflow.start_run(
         run_name=f"trial_{trial.number}",
         nested=True,
-        tags={"mlflow.parentRunId": parent_run_id} if parent_run_id else None,
+        parent_run_id=parent_run_id,
+        # tags={"mlflow.parentRunId": parent_run_id} if parent_run_id else None,
     ) as child_run:
 
         mlflow.log_params(params)
@@ -68,49 +64,58 @@ def objective(trial):
             scoring=make_scorer(mean_squared_error),
             n_jobs=1,
         )
-        # Log current trial's error metric
-        mlflow.log_metrics({"Cross-Validation Error": scores.mean()})
+        
+        crossval_score = scores.mean()
 
+        # Log current trial's error metric
+        mlflow.log_metrics({"Cross-Validation Error": crossval_score})
         for fold_idx, score in enumerate(scores):
             mlflow.log_metric(f"Fold_{fold_idx}_Error", score)
 
         # Make it easy to retrieve the best-performing child run later
         trial.set_user_attr("run_id", child_run.info.run_id)
 
-        return scores.mean()
+        return crossval_score
 
 
-def run_worker(worker_id):
-    mlflow.set_tracking_uri(tracking_uri)
-    mlflow.set_experiment("Hyperparameter Tuning Experiment")
-
+def run_worker(args):
+    worker_id, STUDY_NAME, mlflow_storage = args
+    print("STUDY_NAME2:", STUDY_NAME)
     study = optuna.load_study(
         study_name=STUDY_NAME,
-        storage=MlflowStorage(experiment_id=os.environ.get("MLFLOW_EXPERIMENT_ID")),
-        sampler=optuna.samplers.TPESampler(seed=BASE_SEED + worker_id),
-    )
-
+        storage=mlflow_storage,
+        sampler=optunasampler,
+        )
     study.optimize(
         objective,
         n_trials=NUM_TRIALS_PER_WORKER,
         show_progress_bar=False,
         n_jobs=1,
     )
-
     return worker_id
 
 
 if __name__ == "__main__":
+    
+    # MLflow setup
+    datetime_str = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
+    STUDY_NAME = f"study_{datetime_str}"
+    tracking_uri = os.getenv("MLFLOW_TRACKING_URI")
+    mlflow.set_tracking_uri(tracking_uri)
+    mlflow.set_experiment(EXPERIMENT_NAME)
+    experiment = mlflow.get_experiment_by_name(EXPERIMENT_NAME)
+    mlflow_storage = MlflowStorage(experiment_id=experiment.experiment_id)
 
 
-    with mlflow.start_run(run_name="study") as parent_run:
+    with mlflow.start_run(run_name=STUDY_NAME, log_system_metrics=True) as parent_run:
+
         os.environ["MLFLOW_PARENT_RUN_ID"] = parent_run.info.run_id
 
         optuna.create_study(
             direction="minimize",
-            sampler=optuna.samplers.TPESampler(seed=BASE_SEED),
+            sampler=optunasampler,
             study_name=STUDY_NAME,
-            storage=MlflowStorage(experiment_id=os.environ.get("MLFLOW_EXPERIMENT_ID")),
+            storage=mlflow_storage,
             load_if_exists=True,
         )
 
@@ -119,17 +124,20 @@ if __name__ == "__main__":
             "num_workers": NUM_WORKERS,
             "cv_n_splits": crossvalstrategy.n_splits,
             "seed": BASE_SEED,
-            "dataset": "california_housing",
-            "objective_metric": "cv_mse_mean",
             "study_name": STUDY_NAME,
         })
 
+
+
+        print("STUDY_NAME1:", STUDY_NAME)
+        worker_args = [(worker_id, STUDY_NAME, mlflow_storage)
+            for worker_id in range(NUM_WORKERS)]
         with mp.Pool(processes=NUM_WORKERS) as pool:
-            pool.map(run_worker, range(NUM_WORKERS))
+            pool.map(run_worker, worker_args)
 
         study = optuna.load_study(
             study_name=STUDY_NAME,
-            storage=storage_url,
+            storage=mlflow_storage,
         )
 
         best_params = study.best_trial.params
@@ -142,6 +150,7 @@ if __name__ == "__main__":
         if best_child_run_id:
             mlflow.log_param("best_child_run_id", best_child_run_id)
 
+        # Train final model on full dataset with best hyperparameters. Important: keep same seed
         final_model = lgb.LGBMRegressor(
             **best_params,
             random_state=BASE_SEED,
@@ -149,9 +158,7 @@ if __name__ == "__main__":
             n_jobs=1,
         )
         final_model.fit(X, y)
-
-        signature = infer_signature(X.head(100), final_model.predict(X.head(100)))
-
+        signature = infer_signature(X.sample(100), final_model.predict(X.sample(100)))
         mlflow.lightgbm.log_model(
             lgb_model=final_model,
             name="best_model",
