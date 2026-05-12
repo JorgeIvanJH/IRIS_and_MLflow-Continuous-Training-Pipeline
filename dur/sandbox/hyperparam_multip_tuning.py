@@ -1,4 +1,4 @@
-# TODO: 1. name experiment and rparent run. 2. duplocate parent runs. 3. failing after 3 or more workers, 4
+# TODO: 1. name experiment and rparent run. 2. duplocate parent runs. 3. failing after 3 or more workers, 4. same crossvalidation in trials
 import os
 import dotenv
 import optuna
@@ -23,7 +23,6 @@ BASE_SEED = 42
 NUM_CV_SPLITS = 3
 EXPERIMENT_NAME = "LightGBM Hyperparameter Tuning with Optuna and MLflow"
 crossvalstrategy = KFold(n_splits=NUM_CV_SPLITS, shuffle=True, random_state=BASE_SEED)
-optunasampler = optuna.samplers.TPESampler(seed=BASE_SEED)
 
 # Load dataset
 X, y = fetch_california_housing(return_X_y=True, as_frame=True)
@@ -79,12 +78,16 @@ def objective(trial):
 
 
 def run_worker(args):
-    worker_id, STUDY_NAME, mlflow_storage = args
-    print("STUDY_NAME2:", STUDY_NAME)
+    worker_id, study_name, experiment_id, parent_run_id = args
+    mlflow.set_tracking_uri(os.getenv("MLFLOW_TRACKING_URI"))
+    mlflow.set_experiment(EXPERIMENT_NAME)
+    storage = MlflowStorage(experiment_id=experiment_id)
+    os.environ["MLFLOW_PARENT_RUN_ID"] = parent_run_id
+
     study = optuna.load_study(
-        study_name=STUDY_NAME,
-        storage=mlflow_storage,
-        sampler=optunasampler,
+        study_name=study_name,
+        storage=storage,
+        sampler=optuna.samplers.TPESampler(seed=BASE_SEED+worker_id),
         )
     study.optimize(
         objective,
@@ -99,24 +102,25 @@ if __name__ == "__main__":
     
     # MLflow setup
     datetime_str = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
-    STUDY_NAME = f"study_{datetime_str}"
+    RUN_NAME = f"parent_{datetime_str}"
+    STUDY_NAME = f"optuna_{datetime_str}"
     tracking_uri = os.getenv("MLFLOW_TRACKING_URI")
     mlflow.set_tracking_uri(tracking_uri)
     mlflow.set_experiment(EXPERIMENT_NAME)
     experiment = mlflow.get_experiment_by_name(EXPERIMENT_NAME)
-    mlflow_storage = MlflowStorage(experiment_id=experiment.experiment_id)
+    experiment_id = experiment.experiment_id
+    mlflow_storage = MlflowStorage(experiment_id=experiment_id)
 
 
-    with mlflow.start_run(run_name=STUDY_NAME, log_system_metrics=True) as parent_run:
-
-        os.environ["MLFLOW_PARENT_RUN_ID"] = parent_run.info.run_id
+    with mlflow.start_run(run_name=RUN_NAME, log_system_metrics=True) as parent_run:
+        parent_run_id = parent_run.info.run_id
+        os.environ["MLFLOW_PARENT_RUN_ID"] = parent_run_id
 
         optuna.create_study(
             direction="minimize",
-            sampler=optunasampler,
             study_name=STUDY_NAME,
             storage=mlflow_storage,
-            load_if_exists=True,
+            load_if_exists=True, # TODO: TRY FALSE
         )
 
         mlflow.log_params({
@@ -130,8 +134,10 @@ if __name__ == "__main__":
 
 
         print("STUDY_NAME1:", STUDY_NAME)
-        worker_args = [(worker_id, STUDY_NAME, mlflow_storage)
-            for worker_id in range(NUM_WORKERS)]
+        worker_args = [
+            (worker_id, STUDY_NAME, experiment_id, parent_run_id)
+            for worker_id in range(NUM_WORKERS)
+        ]
         with mp.Pool(processes=NUM_WORKERS) as pool:
             pool.map(run_worker, worker_args)
 
