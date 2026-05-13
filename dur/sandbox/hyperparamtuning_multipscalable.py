@@ -1,4 +1,3 @@
-# TODO: 1. name experiment and rparent run. 2. duplocate parent runs. 3. failing after 3 or more workers, 4. same crossvalidation in trials
 import os
 import dotenv
 import optuna
@@ -10,7 +9,6 @@ from mlflow.models import infer_signature
 import numpy as np
 from sklearn.model_selection import cross_val_score, KFold
 from sklearn.datasets import fetch_california_housing
-from sklearn.metrics import make_scorer, mean_squared_error
 import datetime as dt
 
 dotenv.load_dotenv()
@@ -20,9 +18,9 @@ STORAGE_URL = "sqlite:///optuna_lgbm.db"  # for local testing
 
 # Hyperparameter tuning configuration
 NUM_WORKERS = min(16, mp.cpu_count())
-NUM_TRIALS_PER_WORKER = 5
+NUM_TRIALS_PER_WORKER = 200
 BASE_SEED = 42
-NUM_CV_SPLITS = 3
+NUM_CV_SPLITS = 3 # 5 or 10 would be better
 EXPERIMENT_NAME = "LightGBM Hyperparameter Tuning with Optuna and MLflow"
 crossvalstrategy = KFold(n_splits=NUM_CV_SPLITS, shuffle=True, random_state=BASE_SEED)
 
@@ -62,16 +60,16 @@ def objective(trial):
             X,
             y,
             cv=crossvalstrategy,
-            scoring=make_scorer(mean_squared_error),
+            scoring="neg_mean_squared_error",
             n_jobs=1,
         )
         
-        crossval_score = scores.mean()
+        crossval_score = -scores.mean()
 
         # Log current trial's error metric
         mlflow.log_metrics({"cv_mse_mean": crossval_score})
         for fold_idx, score in enumerate(scores):
-            mlflow.log_metric(f"fold_{fold_idx}_mse", score)
+            mlflow.log_metric(f"fold_{fold_idx}_mse", -score)
 
         # Make it easy to retrieve the best-performing child run later
         trial.set_user_attr("run_id", child_run.info.run_id)
@@ -80,7 +78,7 @@ def objective(trial):
 
 
 def run_worker(args):
-    worker_id, study_name, experiment_id, parent_run_id = args
+    worker_id, study_name, parent_run_id = args
     mlflow.set_tracking_uri(os.getenv("MLFLOW_TRACKING_URI"))
     mlflow.set_experiment(EXPERIMENT_NAME)
     os.environ["MLFLOW_PARENT_RUN_ID"] = parent_run_id
@@ -132,7 +130,7 @@ if __name__ == "__main__":
         })
 
         worker_args = [
-            (worker_id, STUDY_NAME, experiment_id, parent_run_id)
+            (worker_id, STUDY_NAME, parent_run_id)
             for worker_id in range(NUM_WORKERS)
         ]
         with mp.Pool(processes=NUM_WORKERS) as pool:
