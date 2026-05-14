@@ -86,9 +86,6 @@ if __name__ == "__main__":
     tracking_uri = os.getenv("MLFLOW_TRACKING_URI")
     mlflow.set_tracking_uri(tracking_uri)
     mlflow.set_experiment(EXPERIMENT_NAME)
-    experiment = mlflow.get_experiment_by_name(EXPERIMENT_NAME)
-    experiment_id = experiment.experiment_id
-
 
     with mlflow.start_run(run_name=RUN_NAME, log_system_metrics=True) as parent_run:
         parent_run_id = parent_run.info.run_id
@@ -129,7 +126,6 @@ if __name__ == "__main__":
         if best_child_run_id:
             mlflow.log_param("best_child_run_id", best_child_run_id)
 
-        # Train final model on full dataset with best hyperparameters. Important: keep same seed
         final_model = lgb.LGBMRegressor(
             **best_params,
             random_state=BASE_SEED,
