@@ -33,7 +33,7 @@ s version="latest" s r=##class(%Net.HttpRequest).%New(),r.Server="pm.community.i
 Write "Installing IPM packages...",!
 zpm
 repo -r -n registry -url https://pm.community.intersystems.com/ -user "" -pass ""
-install csvgenpy
+install csvgenpy@1.2.5
 quit
 
 Write "Changing to USER namespace for project configuration...",!
