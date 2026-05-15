@@ -48,7 +48,6 @@ Method %OnNew(seed As %Integer = 42, testSize As %Numeric(SCALE=2) = 0.2) As %St
     set ..SEED = seed
     set ..TESTSIZE = testSize
     set ..ESSENTIALCOLUMNS = $lb("x", "y")
-    set ..MODELPARAMS = {"fit_intercept": true} // Default parameters for LinearRegression
 
     set status = $$$OK
     set runid = ""

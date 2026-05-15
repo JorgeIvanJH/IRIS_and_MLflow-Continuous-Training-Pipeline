@@ -32,7 +32,7 @@ Method UploadCSVtoIRIS(csvpath As %String, namespace As %String, package As %Str
             ID INTEGER PRIMARY KEY IDENTITY(1,1),
             x DOUBLE,
             y DOUBLE,
-            label VARCHAR(50),
+            label VARCHAR(1),
             datetime DATETIME DEFAULT CURRENT_TIMESTAMP
         )
         """
@@ -116,9 +116,8 @@ Method CreatePredictionsTable(namespace As %String = "USER", package As %String 
         CREATE TABLE {package}.{tablename} (
             ID INTEGER PRIMARY KEY IDENTITY(1,1),
             PointsIDForeignKey INTEGER,
-            YPred DOUBLE,
+            LabelPred VARCHAR(1),
             Modelrunid VARCHAR(100),
-            MAE DOUBLE,
             InferenceTime DOUBLE,
             datetime DATETIME DEFAULT CURRENT_TIMESTAMP,
             CONSTRAINT fk_PointSamples FOREIGN KEY (PointsIDForeignKey) 
