@@ -1,5 +1,8 @@
 # Continuous Training (CT) pipeline in IRIS and MLflow (with SHAP explainability)
 
+TODO: Explain new problem (Now is classification on a much more complex model using)
+TODO: Separate explanation of each component of the CT from the problem and Optuna and CrossValidation 
+
 This is an integration of IRIS and the Open Source AI engineering platform MLflow, acting as complementary tools for a Continuous Training (CT) pipeline. For context, a CT pipeline is the formalization of a Machine Learning (ML) model developed through data science experimentation on the data available at the time, so it is ready for deployment, autonomous updating with new data, and appropriate performance monitoring. The implementation in this repo leverages MLflow's builtin configuration to store [SHAP](https://shap.readthedocs.io/en/latest/) explainers to provide explanations behind the predictions made by the corresponding model made at the time, including "black-box" complex ones such as Random Forest, XGBoost, Neural Networks, etc.
 
 This is a formal implementation of the CT pipeline for a toy example: you manually draw some points, and a linear regression is fit to predict new points (for "x", the model predicts "y"). This allows testing automatic execution of model degradation and retraining when you decide to change how you draw these points (slope, offset, dispersion, etc).
@@ -257,3 +260,15 @@ Please note for this that these tests were AI generated using GitHub's Copilot. 
 - Implement K-Fold cross-validation for more accurate and reliable performance metrics
 - Right now, the model is only automatically updated through retraining with new data, but the hyperparameters are kept static. By following the instructions in [this guide](https://mlflow.org/docs/latest/ml/getting-started/hyperparameter-tuning/) this pipeline could be improved by introducing hyperparameter flexibility and allowing the model to be re-optimized using the open-source hyperparameter optimization framework (Optuna)[https://optuna.org/]
 - In this project, when prediction performance falls below a predefined threshold, the model is retrained and automatically updated. However, in some cases, human approval should be required before making changes in production, which is something that should be considered
+
+## Optuna
+
+Now with Optuna we can also update hyperparameters in the data, not just the same model over new data
+e.g:
+    if we are limited to linear regression (polimonial regression with order of 1) and the points begin to have curves, it will be impossible to fit a line that represents the pattern of the points. but if we can update the degree of the polinomial features, we can fit a line better to the new points
+
+TODO: Stop relying on STORAGE_URL = "sqlite:///optuna_lgbm.db" 
+
+## Cross Validation SELECTION (VERY IMPORTANT)
+
+IMPORTANT!!! Groups in this new exercise: Points belonging to the same group shall not be split (Datetime acts as identificator for the drawing): StratifiedGroupKFold   (groups exist, classification w imbalanced groups)
