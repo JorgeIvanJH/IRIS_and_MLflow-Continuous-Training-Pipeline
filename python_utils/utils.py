@@ -168,11 +168,13 @@ def IRIS_DBQuery(schema: str, tablename: str, columns: str = "*", filters: str =
 
 
 class Objective:
-    def __init__(self, X, y, groups, params):
+    def __init__(self, X, y, groups, pipeline, paramranges, crossvalidator):
         self.X = X
         self.y = y
         self.groups = groups
-        self.params = params
+        self.pipeline = pipeline
+        self.paramranges = paramranges
+        self.crossvalidator = crossvalidator
 
     def __call__(self, trial):
 
@@ -182,20 +184,9 @@ class Objective:
             run_name=f"trial_{trial.number}",
             nested=True, parent_run_id=parent_run_id) as child_run:
 
-            pipeline = Pipeline([ # TODO: ADD AUGMENTATION STEPS HERE
-                ("scaler", StandardScaler()),
-                ("model", lgb.LGBMClassifier(**self.params))
-            ])
 
-            scores = cross_val_score(
-                pipeline,
-                self.X,
-                self.y,
-                cv=crossvalstrategy,
-                scoring="f1_macro",
-                groups=self.groups,  # Use datetime as the grouping variable to prevent data leakage
-                n_jobs=1,
-            )
+
+            scores = self.crossvalidator(self.pipeline)
             
             crossval_score = scores.mean()
 

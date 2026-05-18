@@ -43,6 +43,12 @@ connection_string = (
 with pyodbc.connect(connection_string) as cnxn:
     df =  pd.read_sql(f"SELECT * FROM MLpipeline.PointSamples", cnxn)
 X = df[["x", "y"]]
+X["year"] = df["datetime"].dt.year
+X["month"] = df["datetime"].dt.month
+X["day"] = df["datetime"].dt.day
+X["hour"] = df["datetime"].dt.hour
+X["minute"] = df["datetime"].dt.minute
+X["second"] = df["datetime"].dt.second
 y = df["label"]
 groups = df["datetime"].astype(str)   # optional, safe for grouping
 

@@ -17,9 +17,9 @@ Property SEED As %Integer;
 
 Property SCALER As %SYS.Python;
 
-// Test size for train-test split (e.g., 0.2 for 20% test data)
+// Number of Cross-Validation splits
 
-Property TESTSIZE As %Numeric(SCALE = 2);
+Property NUMCVSPLITS As %Integer;
 
 // Placeholder for the trained model (e.g., LinearRegression from sklearn)
 
@@ -29,25 +29,51 @@ Property MODEL As %SYS.Python;
 
 Property ESSENTIALCOLUMNS As %List;
 
-// Model parameters stored as a dynamic object for flexibility (e.g., {"fit_intercept": True})
+// Ranges for hyperparameters to be used in model training and tuning (e.g., {"learning_rate": [0.01, 0.1], "n_estimators": [100, 200]})
 
-Property MODELPARAMS As %DynamicObject;
+Property MODELPARAMRANGES As %DynamicObject;
 
 // Run ID for MLflow tracking
 
 Property MLFLOWRUNID As %String;
+
+// Number of Optuna trials for hyperparameter tuning
+
+Property NUMTRIALS As %Integer;
+
+// Number of workers for parallel processing during model training and tuning
+
+Property NUMWORKERS As %Integer;
 
 /*
 Set default values of parameters when a new instance of AutomatedPipeline is created.
 e.g:
     set AP = ##class(MLpipeline.AutomatedPipeline).%New()
 */
-Method %OnNew(seed As %Integer = 42, testSize As %Numeric(SCALE=2) = 0.2) As %Status [ Private ]
+Method %OnNew(seed As %Integer = 42, numCVSplits As %Integer = 5, numTrials As %Integer = 100, numWorkers As %Integer = 1, lrrange As %List = "", mdrange As %List = "", nerange As %List = "", nlrange As %List = "") As %Status [ Private ]
 {
     do ##class(%SYS.System).WriteToConsoleLog("Initializing MLpipeline.AutomatedPipeline instance.", 0, 0)
     set ..SEED = seed
-    set ..TESTSIZE = testSize
-    set ..ESSENTIALCOLUMNS = $lb("x", "y")
+    set ..NUMCVSPLITS = numCVSplits
+    set ..NUMTRIALS = numTrials
+    set ..NUMWORKERS = numWorkers
+    set ..ESSENTIALCOLUMNS = $lb("x", "y", "label", "datetime")
+
+    // Default hyperparameter ranges for model retraining
+    if (lrrange = "") { set lrrange = $listbuild(0.001, 0.2) }
+    if (mdrange = "") { set mdrange = $listbuild(3, 50) }
+    if (nerange = "") { set nerange = $listbuild(50, 1000) }
+    if (nlrange = "") { set nlrange = $listbuild(16, 31, 63, 127, 255) }
+    set ..MODELPARAMRANGES = {
+        "learning_rate": (##class(%HEX.Util).ListToJSON(lrrange)), 
+        "max_depth": (##class(%HEX.Util).ListToJSON(mdrange)),
+        "n_estimators": (##class(%HEX.Util).ListToJSON(nerange)),
+        "num_leaves": (##class(%HEX.Util).ListToJSON(nlrange)),
+        "max_bin": (##class(%HEX.Util).ListToJSON([63, 127, 255])),
+        "random_state": (..SEED),
+        "verbosity": -1,
+        "n_jobs": 1 // Warning: avoid nested parallelism among Optuna trials, cross-validation, and model training. We use NUMWORKERS only for Optuna trials
+    }
 
     set status = $$$OK
     set runid = ""
@@ -67,7 +93,7 @@ Method %OnNew(seed As %Integer = 42, testSize As %Numeric(SCALE=2) = 0.2) As %St
         do ##class(%SYS.System).WriteToConsoleLog("MLflow Error: "_ex.DisplayString(), 0, 2)
     }
 
-    do ##class(%SYS.System).WriteToConsoleLog("Created instance of MLpipeline.AutomatedPipeline with SEED="_seed_" TESTSIZE="_testSize, 0, 0)
+    do ##class(%SYS.System).WriteToConsoleLog("Created instance of MLpipeline.AutomatedPipeline with SEED="_seed_" NUMCVSPLITS="_numCVSplits_" NUMTRIALS="_numTrials, 0, 0)
     Quit status
 }
 
@@ -155,18 +181,42 @@ e.g:
     set AP = ##class(MLpipeline.AutomatedPipeline).%New()
     set df = AP.DataExtraction("2026-02-26 17:50:00")
     set validDf = AP.DataValidation(df)
-    set (Xtrain, Ytrain, Xtest, Ytest) = AP.DataPreparation(validDf)
+    set crossvalidator = AP.DataPreparation(validDf)
 */
 Method DataPreparation(df As %SYS.Python) As %SYS.Python [ Language = python ]
 {
     import iris
     import pandas as pd
-    from sklearn.model_selection import train_test_split
+    from sklearn.model_selection import StratifiedGroupKFold, cross_val_score
     
-    try:       
-        Xtrain, Xtest, Ytrain, Ytest = train_test_split(df[["x"]], df["y"], test_size=self.TESTSIZE, random_state=self.SEED)
-        iris._SYS.System.WriteToConsoleLog("DataPreparation completed.", 0, 0)
-        return (Xtrain, Ytrain, Xtest, Ytest)
+    try:
+        X = df[["x", "y"]]
+        X["year"] = df["datetime"].dt.year
+        X["month"] = df["datetime"].dt.month
+        X["day"] = df["datetime"].dt.day
+        X["hour"] = df["datetime"].dt.hour
+        X["minute"] = df["datetime"].dt.minute
+        X["second"] = df["datetime"].dt.second
+        y = df["label"]
+
+        groups = df["datetime"].astype(str)
+
+        crossvalstrategy = StratifiedGroupKFold(
+            n_splits=self.NUMCVSPLITS, 
+            shuffle=True, 
+            random_state=self.SEED)
+
+        crossvalidator = lambda pipeline: cross_val_score(
+                pipeline,
+                X,
+                y,
+                cv=crossvalstrategy,
+                scoring="f1_macro",
+                groups=groups,
+                n_jobs=1,)
+
+        iris._SYS.System.WriteToConsoleLog("Method for Cross-Validation completed.", 0, 0)
+        return crossvalidator
     except Exception as e:
         print(f"DataPreparation Error: {str(e)}")
         iris._SYS.System.WriteToConsoleLog(f"DataPreparation Error: {str(e)}", 0, 2)
@@ -179,67 +229,157 @@ e.g:
     set AP = ##class(MLpipeline.AutomatedPipeline).%New()
     set df = AP.DataExtraction("2026-02-26 17:50:00")
     set validDf = AP.DataValidation(df)
-    set result  = AP.DataPreparation(validDf)
-    Set Xtrain = result."__getitem__"(0)
-    Set Ytrain = result."__getitem__"(1)
-    Set Xtest  = result."__getitem__"(2)
-    Set Ytest  = result."__getitem__"(3)
-    set model = AP.ModelTraining(Xtrain, Ytrain, {"fit_intercept": true})
+    set crossvalidator = AP.DataPreparation(validDf)
+    set model = AP.ModelTraining(crossvalidator)
 */
-Method ModelTraining(Xtrain As %SYS.Python, Ytrain As %SYS.Python, params As %DynamicObject = "") As %SYS.Python [ Language = python ]
+Method ModelTraining(crossvalidator As %SYS.Python) As %SYS.Python [ Language = python ]
 {
+
+
+
+    
     import os
     import json
     import iris
     import pandas as pd
     import mlflow
     import mlflow.sklearn
-    from sklearn.linear_model import LinearRegression
+    import datetime as dt
     from sklearn.preprocessing import StandardScaler
     from sklearn.pipeline import Pipeline
     from sklearn.metrics import mean_absolute_error, r2_score
 
+    class Objective:
+        """
+        Objective class for Optuna hyperparameter optimization, integrated with MLflow for logging each trial's parameters, metrics, and artifacts.
+        
+        Args:
+            pipeline: A function that takes hyperparameters as input and returns a scikit-learn Pipeline object.
+            paramranges: A dictionary containing the ranges for each hyperparameter to be optimized.
+            crossvalidator: A function that takes a pipeline as input and returns cross-validation scores.
+        
+        Returns:
+            The mean cross-validation score for the given set of hyperparameters.
+        """
+
+        def __init__(self, pipeline, paramranges, crossvalidator):
+            self.pipeline = pipeline
+            self.paramranges = paramranges
+            self.crossvalidator = crossvalidator
+
+        def __call__(self, trial):
+
+
+            params = {
+                "learning_rate": trial.suggest_float("learning_rate", *self.paramranges["learning_rate"], log=True),
+                "max_depth": trial.suggest_int("max_depth", *self.paramranges["max_depth"]),
+                "n_estimators": trial.suggest_int("n_estimators", *self.paramranges["n_estimators"]),
+                "num_leaves": trial.suggest_int("num_leaves", *self.paramranges["num_leaves"]),
+                "max_bin": trial.suggest_categorical("max_bin", self.paramranges["max_bin"]),
+                "random_state": self.paramranges["random_state"],
+                "verbosity": self.paramranges["verbosity"],
+                "n_jobs": self.paramranges["n_jobs"],
+            }
+
+            # Get MLflow parent run ID for nested logging
+            MLflowParentRun = iris.gref("^MLflowParentRun")
+            parent_run_id = MLflowParentRun["RunID"]
+            # Logging child runs for each Optuna trial under the same parent run
+            with mlflow.start_run(
+                run_name=f"trial_{trial.number}",
+                nested=True, parent_run_id=parent_run_id) as child_run:
+                scores = self.crossvalidator(self.pipeline(**params))
+                crossval_score = scores.mean()
+                # Logging metrics
+                for fold_idx, score in enumerate(scores):
+                    mlflow.log_metric(f"fold_{fold_idx}_f1", score)
+                mlflow.log_metrics({"cv_f1_mean": crossval_score})
+                trial.set_user_attr("run_id", child_run.info.run_id)
+                return crossval_score
+
 
     try:
+
+        # Model training Pipeline definition
+        pipeline = lambda params: Pipeline([ # TODO: ADD AUGMENTATION STEPS HERE
+            ("scaler", StandardScaler()),
+            ("model", lgb.LGBMClassifier(**params))
+        ]) 
+        iris._SYS.System.WriteToConsoleLog(f"Model training pipeline defined as: {pipeline}", 0, 0)
+
+        # MLflow setup
+        datetime_str = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
+        RUN_NAME = f"parent_{datetime_str}"
+        STUDY_NAME = f"optuna_{datetime_str}"
+        tracking_uri = os.getenv("MLFLOW_TRACKING_URI")
         mlflow.set_tracking_uri(os.getenv("MLFLOW_TRACKING_URI_IRIS"))
         mlflow.set_experiment(self._GetParameter("EXPERIMENTNAME"))
         mlflow.sklearn.autolog()
 
-        # Parse Parameters
-        params_dict = json.loads(params._ToJSON())
-        iris._SYS.System.WriteToConsoleLog(f"ModelTraining received parameters: {params_dict}", 0, 0)
 
-        # Define the entire pipeline with learned transformations and model
-        model = Pipeline([
-            ('scaler', StandardScaler()),
-            ('model', LinearRegression(**params_dict))
-        ])
-
-        # Training and logging with MLflow
-        with mlflow.start_run(run_id=self.MLFLOWRUNID):
-            iris._SYS.System.WriteToConsoleLog("Training LinearRegression model with provided training data and parameters.", 0, 0)
-            model.fit(Xtrain, Ytrain)
-
-            # Saving Model
-            model_path = os.path.join(self._GetParameter("MODELSPATH"), self.MLFLOWRUNID)
-            mlflow.sklearn.save_model(model, model_path)
-
-            
-            iris._SYS.System.WriteToConsoleLog("Model training completed successfully.", 0, 0)
-            # Calculate metrics
-            y_pred_train = model.predict(Xtrain)
-
-            # Log manually with custom keys
-            mlflow.log_metrics({
-                "train_mae": mean_absolute_error(Ytrain, y_pred_train),
-                "train_r2": r2_score(Ytrain, y_pred_train),
+        with mlflow.start_run(run_id=self.MLFLOWRUNID, run_name=RUN_NAME, log_system_metrics=True) as parent_run:
+            MLflowParentRun = iris.gref("^MLflowParentRun")
+            MLflowParentRun["RunID"] = parent_run.info.run_id
+            mlflow.log_params({
+                "n_trials": self.NUMTRIALS,
+                "num_workers": self.NUMWORKERS,
+                "cv_n_splits": self.NUMCVSPLITS,
+                "seed": self.SEED,
+                "study_name": STUDY_NAME,
             })
+
+            study = optuna.create_study(
+                direction="maximize",
+                study_name=STUDY_NAME,
+                storage="sqlite:///optuna_lgbm.db",  # TODO: avoid using this one
+                load_if_exists=False,
+            )
+            
+            # Parse Parameters
+            paramsranges = self.MODELPARAMRANGES
+            iris._SYS.System.WriteToConsoleLog(f"ModelTraining received parameter ranges: {paramsranges}", 0, 0)
+
+            # Run Optuna optimization
+            study.optimize(Objective(pipeline, paramsranges, crossvalidator),
+                n_trials=self.NUMTRIALS,
+                n_jobs=self.NUMWORKERS
+                )
+            iris._SYS.System.WriteToConsoleLog(f"Optuna optimization completed. Best trial: {study.best_trial.number} with value: {study.best_value}", 0, 0)
+
+            # Logging best trial's parameters and metrics to MLflow    
+            best_params = study.best_trial.params
+            best_value = study.best_value
+            best_child_run_id = study.best_trial.user_attrs.get("run_id")
+            mlflow.log_params({f"best_{k}": v for k, v in best_params.items()})
+            mlflow.log_metric("best_cv_f1", float(best_value))
+            if best_child_run_id:
+                mlflow.log_param("best_child_run_id", best_child_run_id)
+
+            # Save the best model from the best trial
+            model_path = os.path.join(self._GetParameter("MODELSPATH"), self.MLFLOWRUNID)
+            final_model = lgb.LGBMClassifier(
+                **best_params,
+                random_state=self.SEED,
+                verbosity=-1,
+                n_jobs=self.NUMWORKERS,
+            )
+            final_model.fit(X, y)
+            input_sample = X.sample(100, random_state=self.SEED)
+            signature = infer_signature(input_sample, final_model.predict(input_sample))
+            mlflow.lightgbm.log_model(
+                lgb_model=final_model,
+                name="best_model",
+                signature=signature,
+                input_example=X.head(5),
+            )
+            mlflow.lightgbm.save_model(final_model, model_path)
+            iris._SYS.System.WriteToConsoleLog("Model training completed successfully.", 0, 0)
 
             # Tag successful training for future identification of runs
             mlflow.set_tag("TrainingStatus", "OK")
-            self.MODEL = model
+            self.MODEL = final_model
             iris._SYS.System.WriteToConsoleLog("ModelTraining completed.", 0, 0)
-            return model
+            return final_model
 
     except Exception as e:
         print(f"ModelTraining Error: {str(e)}")
