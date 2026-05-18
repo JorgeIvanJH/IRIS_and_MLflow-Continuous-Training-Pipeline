@@ -5,9 +5,9 @@ Class MLpipeline.PerformanceMonitoring Extends %RegisteredObject
 
 Parameter EXPERIMENTNAME = "PerformanceMonitoring";
 
-// Minimum R2 score threshold for model performance to trigger retraining
+// Minimum F1 score threshold for model performance to trigger retraining
 
-Parameter R2THRESHOLD = 0.2;
+Parameter F1THRESHOLD = 0.7;
 
 // Current Date and Time for logging purposes
 
@@ -81,23 +81,23 @@ Method FetchTables(fromdatetime As %String) As %SYS.Python [ Language = python ]
 }
 
 /*
-Triggers the retraining pipeline if performance degradation is detected based on the R2 score.
+Triggers the retraining pipeline if performance degradation is detected based on the F1 score.
 e.g:
     set PM = ##class(MLpipeline.PerformanceMonitoring).%New()
     set status = PM.Trigger(0.15, "2026-02-26 17:50:00")
 */
-Method Trigger(r2 As %Numeric, fromdatetime As %String) As %Status [ Language = python ]
+Method Trigger(f1 As %Numeric, fromdatetime As %String) As %Status [ Language = python ]
 {
     import iris
-    minr2threshold = float(iris.cls(__name__)._GetParameter("R2THRESHOLD"))
+    minf1threshold = float(iris.cls(__name__)._GetParameter("F1THRESHOLD"))
 
-    if r2 < minr2threshold:
-        iris._SYS.System.WriteToConsoleLog(f"[PERFORMANCE MONITORING] Performance degradation detected! R2 score {r2} is below the threshold of {minr2threshold}. RETRAINING...", 0, 0)
+    if f1 < minf1threshold:
+        iris._SYS.System.WriteToConsoleLog(f"[PERFORMANCE MONITORING] Performance degradation detected! F1 score {f1} is below the threshold of {minf1threshold}. RETRAINING...", 0, 0)
         AP = iris.MLpipeline.AutomatedPipeline._New()
         summary = AP.RunPipeline(fromdatetime)
         iris._SYS.System.WriteToConsoleLog(f"[PERFORMANCE MONITORING] Retraining pipeline triggered. Summary: {summary}", 0, 0)
     else:
-        iris._SYS.System.WriteToConsoleLog(f"[PERFORMANCE MONITORING] Model performance is stable. R2 score: {r2} is above the threshold of {minr2threshold}.", 0, 0)
+        iris._SYS.System.WriteToConsoleLog(f"[PERFORMANCE MONITORING] Model performance is stable. F1 score: {f1} is above the threshold of {minf1threshold}.", 0, 0)
 }
 
 /*
@@ -112,7 +112,7 @@ Method MetricsMonitoring(fromdatetime As %String) As %Status [ Language = python
     import iris
     import mlflow
     import pandas as pd
-    from sklearn.metrics import mean_absolute_error, r2_score
+    from sklearn.metrics import f1_score
     from python_utils.utils import IRIS_DBQuery
     import matplotlib.pyplot as plt
     import seaborn as sns
@@ -148,11 +148,10 @@ Method MetricsMonitoring(fromdatetime As %String) As %Status [ Language = python
         latest_active_predictions = pd.merge(latest_active_predictions, PointSamples_df[["id", "y"]], left_on="pointsidforeignkey", right_on="id", how="left")
 
         with mlflow.start_run(run_id=self.MLFLOWRUNID):
-            mae = mean_absolute_error(latest_active_predictions["y"], latest_active_predictions["ypred"])
-            r2 = r2_score(latest_active_predictions["y"], latest_active_predictions["ypred"])
 
-            mlflow.log_metric("MAE", mae)
-            mlflow.log_metric("R2", r2)
+            f1 = f1_score(latest_active_predictions["y"], latest_active_predictions["ypred"], average="weighted")
+
+            mlflow.log_metric("F1", f1)
 
             modelrun = mlflow.get_run(latest_model)
             mlflow.set_tag("model_id", latest_model)
@@ -162,7 +161,7 @@ Method MetricsMonitoring(fromdatetime As %String) As %Status [ Language = python
             mlflow.log_figure(fig, "plots/performance_monitoring.png")
             plt.close(fig)
 
-        self.Trigger(r2, fromdatetime) # Trigger retraining if performance degradation is detected
+        self.Trigger(f1, fromdatetime) # Trigger retraining if performance degradation is detected
 
         return True
 

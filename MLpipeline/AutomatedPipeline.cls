@@ -17,6 +17,10 @@ Property SEED As %Integer;
 
 Property SCALER As %SYS.Python;
 
+// Test size for train-test split (e.g., 0.2 for 20% test data)
+
+Property TESTSIZE As %Numeric(SCALE = 2);
+
 // Number of Cross-Validation splits
 
 Property NUMCVSPLITS As %Integer;
@@ -50,10 +54,11 @@ Set default values of parameters when a new instance of AutomatedPipeline is cre
 e.g:
     set AP = ##class(MLpipeline.AutomatedPipeline).%New()
 */
-Method %OnNew(seed As %Integer = 42, numCVSplits As %Integer = 5, numTrials As %Integer = 100, numWorkers As %Integer = 1, lrrange As %List = "", mdrange As %List = "", nerange As %List = "", nlrange As %List = "") As %Status [ Private ]
+Method %OnNew(seed As %Integer = 42, testSize As %Numeric(SCALE = 2) = 0.2, numCVSplits As %Integer = 5, numTrials As %Integer = 100, numWorkers As %Integer = 1, lrrange As %List = "", mdrange As %List = "", nerange As %List = "", nlrange As %List = "") As %Status [ Private ]
 {
     do ##class(%SYS.System).WriteToConsoleLog("Initializing MLpipeline.AutomatedPipeline instance.", 0, 0)
     set ..SEED = seed
+    set ..TESTSIZE = testSize
     set ..NUMCVSPLITS = numCVSplits
     set ..NUMTRIALS = numTrials
     set ..NUMWORKERS = numWorkers
@@ -93,7 +98,7 @@ Method %OnNew(seed As %Integer = 42, numCVSplits As %Integer = 5, numTrials As %
         do ##class(%SYS.System).WriteToConsoleLog("MLflow Error: "_ex.DisplayString(), 0, 2)
     }
 
-    do ##class(%SYS.System).WriteToConsoleLog("Created instance of MLpipeline.AutomatedPipeline with SEED="_seed_" NUMCVSPLITS="_numCVSplits_" NUMTRIALS="_numTrials, 0, 0)
+    do ##class(%SYS.System).WriteToConsoleLog("Created instance of MLpipeline.AutomatedPipeline with SEED="_seed_" TESTSIZE="_testSize_" NUMCVSPLITS="_numCVSplits_" NUMTRIALS="_numTrials, 0, 0)
     Quit status
 }
 
@@ -187,10 +192,11 @@ Method DataPreparation(df As %SYS.Python) As %SYS.Python [ Language = python ]
 {
     import iris
     import pandas as pd
-    from sklearn.model_selection import StratifiedGroupKFold, cross_val_score
+    from sklearn.model_selection import train_test_split, StratifiedGroupKFold, cross_val_score
     
     try:
-        X = df[["x", "y"]]
+        # Feature engineering
+        X = df[["x", "y"]].copy()
         X["year"] = df["datetime"].dt.year
         X["month"] = df["datetime"].dt.month
         X["day"] = df["datetime"].dt.day
@@ -198,9 +204,19 @@ Method DataPreparation(df As %SYS.Python) As %SYS.Python [ Language = python ]
         X["minute"] = df["datetime"].dt.minute
         X["second"] = df["datetime"].dt.second
         y = df["label"]
-
         groups = df["datetime"].astype(str)
 
+        
+        # Group-aware train/test split
+        splitter = GroupShuffleSplit(n_splits=1, test_size=self.TESTSIZE,random_state=self.SEED)
+        trainval_idx, test_idx = next(splitter.split(X, y, groups=groups))
+        Xtrainval = X.iloc[trainval_idx]
+        Xtest = X.iloc[test_idx]
+        Ytrainval = y.iloc[trainval_idx]
+        Ytest = y.iloc[test_idx]
+        groups_trainval = groups.iloc[trainval_idx]
+
+        # Group-aware stratified CV inside trainval only
         crossvalstrategy = StratifiedGroupKFold(
             n_splits=self.NUMCVSPLITS, 
             shuffle=True, 
@@ -208,15 +224,15 @@ Method DataPreparation(df As %SYS.Python) As %SYS.Python [ Language = python ]
 
         crossvalidator = lambda pipeline: cross_val_score(
                 pipeline,
-                X,
-                y,
+                Xtrainval,
+                Ytrainval,
                 cv=crossvalstrategy,
                 scoring="f1_macro",
-                groups=groups,
-                n_jobs=1,)
+                groups=groups_trainval,
+                n_jobs=1,) # Warning: avoid nested parallelism among Optuna trials, cross-validation, and model training. We use n_jobs > 1 only for Optuna trials
 
         iris._SYS.System.WriteToConsoleLog("Method for Cross-Validation completed.", 0, 0)
-        return crossvalidator
+        return crossvalidator, Xtest, Ytest
     except Exception as e:
         print(f"DataPreparation Error: {str(e)}")
         iris._SYS.System.WriteToConsoleLog(f"DataPreparation Error: {str(e)}", 0, 2)
@@ -229,7 +245,7 @@ e.g:
     set AP = ##class(MLpipeline.AutomatedPipeline).%New()
     set df = AP.DataExtraction("2026-02-26 17:50:00")
     set validDf = AP.DataValidation(df)
-    set crossvalidator = AP.DataPreparation(validDf)
+    set crossvalidator, Xtest, Ytest = AP.DataPreparation(validDf)
     set model = AP.ModelTraining(crossvalidator)
 */
 Method ModelTraining(crossvalidator As %SYS.Python) As %SYS.Python [ Language = python ]
@@ -388,17 +404,13 @@ Method ModelTraining(crossvalidator As %SYS.Python) As %SYS.Python [ Language = 
 }
 
 /*
-Evaluates the trained model using the test data and returns performance metrics (e.g., MSE, R2 Score).
+Evaluates the trained model using the test data and returns performance metrics (e.g., F1 score, MAE, R2, etc.). Also creates SHAP explanations and logs them as artifacts in MLflow along with custom metrics and plots.
 e.g:
     set AP = ##class(MLpipeline.AutomatedPipeline).%New()
     set df = AP.DataExtraction("2026-02-26 17:50:00")
     set validDf = AP.DataValidation(df)
-    set result  = AP.DataPreparation(validDf)
-    Set Xtrain = result."__getitem__"(0)
-    Set Ytrain = result."__getitem__"(1)
-    Set Xtest  = result."__getitem__"(2)
-    Set Ytest  = result."__getitem__"(3)
-    set model = AP.ModelTraining(Xtrain, Ytrain, {"fit_intercept": true})
+    set crossvalidator, Xtest, Ytest = AP.DataPreparation(validDf)
+    set model = AP.ModelTraining(crossvalidator)
     set newmodelmetrics = AP.ModelEvaluation(model, Xtest, Ytest)
 */
 Method ModelEvaluation(model As %SYS.Python, Xtest As %SYS.Python, Ytest As %SYS.Python) As %SYS.Python [ Language = python ]
@@ -410,26 +422,44 @@ Method ModelEvaluation(model As %SYS.Python, Xtest As %SYS.Python, Ytest As %SYS
     from mlflow.models import infer_signature
     from mlflow.models import make_metric
     from mlflow.metrics.base import MetricValue
+    from sklearn.metrics import f1_score
     import matplotlib.pyplot as plt
 
 
-    def cutom_metric(predictions, targets, metrics):
-        """placeholder for a custom evaluation metric to be logged later"""
-        custom_value = (predictions - targets).abs().mean() # Example: mean absolute error as a custom metric
-        return MetricValue(aggregate_results={"custom_mae": custom_value})
+    def custom_metric(predictions, targets, metrics):
+        """
+        Example of a custom metric.
+        This is a placeholder for a custom evaluation metric to be logged later.
+
+        Here you can put any custom logic to compute a metric based on the predictions and targets. E.g. ROI, profit, or any business-specific metric that is not covered by standard metrics. TODO: Emphasize this in the documentation and presentation
+        """
+        custom_value = (f1_score(targets, predictions, average="weighted") * 3.1416 )  # Just an example using F1 score multiplied by a random factor to simulate a custom metric. Replace with actual logic.
+        return MetricValue(aggregate_results={"custom_metric": custom_value})
 
     def custom_plot(eval_df, builtin_metrics, artifacts_dir):
         """placeholder for a custom plotting function to be logged later"""
-        plt.figure(figsize=(6, 6))
-        plt.xlim(0, 200)
-        plt.ylim(0, 200)
-        plt.scatter(eval_df["target"], eval_df["prediction"], alpha=0.5)
-        plt.plot([eval_df["target"].min(), eval_df["target"].max()], [eval_df["target"].min(), eval_df["target"].max()], 'r--')
-        plt.xlabel("True Values")
-        plt.ylabel("Predictions")
-        plt.title("Custom Prediction vs True Values Plot")
-        plt.grid()
-        
+        color_map = {'a': 'blue', 'b': 'yellow', 'c': 'green', 'd': 'red'}
+
+        fig, axes = plt.subplots(1, 2, figsize=(12, 5), sharex=True, sharey=True)
+        for label, color in color_map.items():
+            actual = eval_df[eval_df.get("label") == label]
+            if not actual.empty:
+                axes[0].scatter(actual.get("x"), actual.get("y"), s=12, c=color, label=label, alpha=0.7)
+
+            predicted = eval_df[eval_df.get("pred") == label]
+            if not predicted.empty:
+                axes[1].scatter(predicted.get("x"), predicted.get("y"), s=12, c=color, label=label, alpha=0.7)
+
+        axes[0].set_title("Actual labels")
+        axes[1].set_title("Model predictions")
+
+        for ax in axes:
+            ax.set_xlabel("x")
+            ax.set_ylabel("y")
+            ax.legend()
+
+        plt.tight_layout()
+
         # save plot to artifacts directory
         plot_path = os.path.join(artifacts_dir, "custom_plot.png")
         plt.savefig(plot_path)
@@ -440,22 +470,22 @@ Method ModelEvaluation(model As %SYS.Python, Xtest As %SYS.Python, Ytest As %SYS
     try:
         mlflow.set_tracking_uri(os.getenv("MLFLOW_TRACKING_URI_IRIS"))
         mlflow.set_experiment(self._GetParameter("EXPERIMENTNAME"))
-        mlflow.sklearn.autolog()
+        mlflow.lightgbm.autolog()
 
-        custom_metric = make_metric(eval_fn=cutom_metric, greater_is_better=False, name="custom_mae")
+        custom_metric = make_metric(eval_fn=custom_metric, greater_is_better=True, name="custom_metric")
 
         eval_data = Xtest.copy()
-        eval_data["target"] = Ytest
+        eval_data["label"] = Ytest
 
         # Test logging with MLflow on the same run as training
         with mlflow.start_run(run_id=self.MLFLOWRUNID):
             signature = infer_signature(Xtest, model.predict(Xtest))
-            model_info = mlflow.sklearn.log_model(model, name="model", signature=signature)
+            model_info = mlflow.lightgbm.log_model(model, name="model", signature=signature)
             result = mlflow.models.evaluate(
                 model_info.model_uri,
                 eval_data,
-                targets="target",
-                model_type="regressor",
+                targets="label",
+                model_type="classifier",
                 extra_metrics=[custom_metric],
                 custom_artifacts=[custom_plot],
                 evaluator_config={
@@ -465,14 +495,15 @@ Method ModelEvaluation(model As %SYS.Python, Xtest As %SYS.Python, Ytest As %SYS
                 "log_model_explanations": True,
                 }
             )
-            mae = result.metrics["mean_absolute_error"]
-            r2 = result.metrics["r2_score"]
-            metrics = {"val_mae": mae, "val_r2": r2}
+            f1 = result.metrics["f1_score"]
+            metrics = {
+                "val_f1": f1,
+            }
 
             # Tag successful evaluation for future identification of runs
             mlflow.set_tag("EvaluationStatus", "OK")
 
-            iris._SYS.System.WriteToConsoleLog(f"ModelEvaluation completed. MAE: {mae}, R2 Score: {r2}", 0, 0)
+            iris._SYS.System.WriteToConsoleLog(f"ModelEvaluation completed. F1 Score: {f1}", 0, 0)
 
             return metrics
 
@@ -490,28 +521,23 @@ e.g:
     set AP = ##class(MLpipeline.AutomatedPipeline).%New()
     set df = AP.DataExtraction("2026-02-26 17:50:00")
     set validDf = AP.DataValidation(df)
-    set result  = AP.DataPreparation(validDf)
-    Set Xtrain = result."__getitem__"(0)
-    Set Ytrain = result."__getitem__"(1)
-    Set Xtest  = result."__getitem__"(2)
-    Set Ytest  = result."__getitem__"(3)
-    set model = AP.ModelTraining(Xtrain, Ytrain, {"fit_intercept": true})
+    set crossvalidator, Xtest, Ytest = AP.DataPreparation(validDf)
+    set model = AP.ModelTraining(crossvalidator)
     set newmodelmetrics = AP.ModelEvaluation(model, Xtest, Ytest)
-    set bestrunid = AP.ModelValidation(newmodelmetrics, result)
+    set bestrunid = AP.ModelValidation(newmodelmetrics, Xtest, Ytest)
 */
-Method ModelValidation(newmodelmetrics As %SYS.Python, result As %SYS.Python, plotComparison As %Boolean = 1) As %SYS.Python [ Language = python ]
+Method ModelValidation(newmodelmetrics As %SYS.Python, Xtest As %SYS.Python, Ytest As %SYS.Python) As %SYS.Python [ Language = python ]
 {
     import os
     import iris
     import mlflow
     import pandas as pd
     from pathlib import Path
-    from sklearn.metrics import mean_absolute_error, r2_score
+    from sklearn.metrics import f1_score
     from python_utils.utils import plot_inference, safe_model_load
 
     try:
 
-        Xtrain, Ytrain, Xtest, Ytest = result
 
         # Get newly trained model's run information
         newmodel_run = mlflow.get_run(self.MLFLOWRUNID)
@@ -527,13 +553,12 @@ Method ModelValidation(newmodelmetrics As %SYS.Python, result As %SYS.Python, pl
             iris._SYS.System.WriteToConsoleLog(f"Current model in production found and loaded. Model Path: {prod_model_path}. Run Name: {prodmodel_run.data.tags.get('mlflow.runName')}", 0, 0)
             # Evaluate the model currently in production on the new test set for comparison
             prod_y_pred = prod_model.predict(Xtest)
-            mae = mean_absolute_error(Ytest, prod_y_pred)
-            r2 = r2_score(Ytest, prod_y_pred)
-            oldmodelmetrics = {"val_mae": mae, "val_r2": r2}
-            iris._SYS.System.WriteToConsoleLog(f"Old Model Evaluation - MAE: {oldmodelmetrics['val_mae']}, R2 Score: {oldmodelmetrics['val_r2']}", 0, 0)
-            iris._SYS.System.WriteToConsoleLog(f"New Model Evaluation - MAE: {newmodelmetrics['val_mae']}, R2 Score: {newmodelmetrics['val_r2']}", 0, 0)
+            f1 = f1_score(Ytest, prod_y_pred, average="weighted")
+            oldmodelmetrics = {"val_f1": f1}
+            iris._SYS.System.WriteToConsoleLog(f"Old Model Evaluation - F1 Score: {oldmodelmetrics['val_f1']}", 0, 0)
+            iris._SYS.System.WriteToConsoleLog(f"New Model Evaluation - F1 Score: {newmodelmetrics['val_f1']}", 0, 0)
             # Metrics comparison logic
-            if newmodelmetrics["val_mae"] < oldmodelmetrics["val_mae"] and newmodelmetrics["val_r2"] > oldmodelmetrics["val_r2"]:
+            if newmodelmetrics["val_f1"] > oldmodelmetrics["val_f1"]:
                 iris._SYS.System.WriteToConsoleLog("New model outperforms the model in production.", 0, 0)
                 best_run_id = self.MLFLOWRUNID
             else:
@@ -580,7 +605,7 @@ Method RunPipeline(datetimestr As %String) As %SYS.Python [ Language = python ]
         # Step 3: Data Preparation
         iris._SYS.System.WriteToConsoleLog("Starting DataPreparation.", 0, 0)
         preparation_result = self.DataPreparation(valid_df)
-        Xtrain, Ytrain, Xtest, Ytest = preparation_result
+        crossvalidator, Xtest, Ytest = preparation_result
 
         # Step 4: Model Training
         iris._SYS.System.WriteToConsoleLog("Starting ModelTraining.", 0, 0)
@@ -592,7 +617,7 @@ Method RunPipeline(datetimestr As %String) As %SYS.Python [ Language = python ]
 
         # Step 6: Model Validation
         iris._SYS.System.WriteToConsoleLog("Starting ModelValidation.", 0, 0)
-        bestrunid = self.ModelValidation(newmodelmetrics, preparation_result)
+        bestrunid = self.ModelValidation(newmodelmetrics, Xtest, Ytest)
 
         # Model Promoting process
         iris._SYS.System.WriteToConsoleLog("Starting PromotingLogic.", 0, 0)
