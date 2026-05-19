@@ -49,6 +49,15 @@ Property NUMTRIALS As %Integer;
 
 Property NUMWORKERS As %Integer;
 
+ClassMethod ListToDynamicArray(list As %List) As %DynamicArray
+{
+    Set arr = ##class(%DynamicArray).%New()
+    For i=1:1:$LISTLENGTH(list) {
+        Do arr.%Push($LISTGET(list,i))
+    }
+    Quit arr
+}
+
 /*
 Set default values of parameters when a new instance of AutomatedPipeline is created.
 e.g:
@@ -56,49 +65,52 @@ e.g:
 */
 Method %OnNew(seed As %Integer = 42, testSize As %Numeric(SCALE = 2) = 0.2, numCVSplits As %Integer = 5, numTrials As %Integer = 100, numWorkers As %Integer = 1, lrrange As %List = "", mdrange As %List = "", nerange As %List = "", nlrange As %List = "") As %Status [ Private ]
 {
-    do ##class(%SYS.System).WriteToConsoleLog("Initializing MLpipeline.AutomatedPipeline instance.", 0, 0)
-    set ..SEED = seed
-    set ..TESTSIZE = testSize
-    set ..NUMCVSPLITS = numCVSplits
-    set ..NUMTRIALS = numTrials
-    set ..NUMWORKERS = numWorkers
-    set ..ESSENTIALCOLUMNS = $lb("x", "y", "label", "datetime")
 
-    // Default hyperparameter ranges for model retraining
-    if (lrrange = "") { set lrrange = $listbuild(0.001, 0.2) }
-    if (mdrange = "") { set mdrange = $listbuild(3, 50) }
-    if (nerange = "") { set nerange = $listbuild(50, 1000) }
-    if (nlrange = "") { set nlrange = $listbuild(16, 31, 63, 127, 255) }
-    set ..MODELPARAMRANGES = {
-        "learning_rate": (##class(%HEX.Util).ListToJSON(lrrange)), 
-        "max_depth": (##class(%HEX.Util).ListToJSON(mdrange)),
-        "n_estimators": (##class(%HEX.Util).ListToJSON(nerange)),
-        "num_leaves": (##class(%HEX.Util).ListToJSON(nlrange)),
-        "max_bin": (##class(%HEX.Util).ListToJSON([63, 127, 255])),
-        "random_state": (..SEED),
-        "verbosity": -1,
-        "n_jobs": 1 // Warning: avoid nested parallelism among Optuna trials, cross-validation, and model training. We use NUMWORKERS only for Optuna trials
+    Set status = $$$OK
+
+    Try {
+
+        Do ##class(%SYS.System).WriteToConsoleLog("Initializing MLpipeline.AutomatedPipeline instance.", 0, 0)
+        
+        Set ..SEED = seed
+        Set ..TESTSIZE = testSize
+        Set ..NUMCVSPLITS = numCVSplits
+        Set ..NUMTRIALS = numTrials
+        Set ..NUMWORKERS = numWorkers
+        Set ..ESSENTIALCOLUMNS = $LISTBUILD("x", "y", "label", "datetime")
+
+        // Default hyperparameter ranges for model retraining
+        If (lrrange = "") { Set lrrange = $LISTBUILD(0.001, 0.2) }
+        If (mdrange = "") { Set mdrange = $LISTBUILD(3, 50) }
+        If (nerange = "") { Set nerange = $LISTBUILD(50, 1000) }
+        If (nlrange = "") { Set nlrange = $LISTBUILD(16, 31, 63, 127, 255) }
+        Set ranges = ##class(%DynamicObject).%New()
+        Do ranges.%Set("learning_rate", ..ListToDynamicArray(lrrange))
+        Do ranges.%Set("max_depth", ..ListToDynamicArray(mdrange))
+        Do ranges.%Set("n_estimators", ..ListToDynamicArray(nerange))
+        Do ranges.%Set("num_leaves", ..ListToDynamicArray(nlrange))
+        Do ranges.%Set("max_bin", ..ListToDynamicArray($LISTBUILD(63,127,255)))
+        Do ranges.%Set("random_state", ..SEED)
+        Do ranges.%Set("verbosity", -1)
+        Do ranges.%Set("n_jobs", 1) // Warning: avoid nested parallelism among Optuna trials, cross-validation, and model training. We use NUMWORKERS only for Optuna trials
+        Set ..MODELPARAMRANGES = ranges
+
+        // MLflow setup
+        Set runid = ""
+        Set mlflow = ##class(%SYS.Python).Import("mlflow")
+        Do mlflow."set_tracking_uri"($SYSTEM.Util.GetEnviron("MLFLOW_TRACKING_URI_IRIS"))
+        Do mlflow."set_experiment"(..#EXPERIMENTNAME)
+        Do mlflow."end_run"() // Ensure no active run before starting a new one
+        Set run = mlflow."start_run"()
+        Set runid = run.info."run_id"
+        Do mlflow."end_run"()
+        Set ..MLFLOWRUNID = runid
+        Do ##class(%SYS.System).WriteToConsoleLog("Created MLflow run with ID="_runid, 0, 0)
+        Do ##class(%SYS.System).WriteToConsoleLog("Created instance of MLpipeline.AutomatedPipeline with SEED="_seed_" TESTSIZE="_testSize_" NUMCVSPLITS="_numCVSplits_" NUMTRIALS="_numTrials, 0, 0)
+    } Catch ex {
+        Set status = ex.AsStatus()
+        Do ##class(%SYS.System).WriteToConsoleLog("MLflow Error: "_ex.DisplayString(), 0, 2)
     }
-
-    set status = $$$OK
-    set runid = ""
-
-    try {
-        set mlflow = ##class(%SYS.Python).Import("mlflow")
-        do mlflow."set_tracking_uri"($System.Util.GetEnviron("MLFLOW_TRACKING_URI_IRIS"))
-        do mlflow."set_experiment"(..#EXPERIMENTNAME)
-        do mlflow."end_run"() // Ensure no active run before starting a new one
-        set run = mlflow."start_run"()
-        set runid = run.info."run_id"
-        do mlflow."end_run"()
-        set ..MLFLOWRUNID = runid
-        do ##class(%SYS.System).WriteToConsoleLog("Created MLflow run with ID="_runid, 0, 0)
-    } catch ex {
-        set status = ex.AsStatus()
-        do ##class(%SYS.System).WriteToConsoleLog("MLflow Error: "_ex.DisplayString(), 0, 2)
-    }
-
-    do ##class(%SYS.System).WriteToConsoleLog("Created instance of MLpipeline.AutomatedPipeline with SEED="_seed_" TESTSIZE="_testSize_" NUMCVSPLITS="_numCVSplits_" NUMTRIALS="_numTrials, 0, 0)
     Quit status
 }
 
