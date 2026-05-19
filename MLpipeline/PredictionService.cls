@@ -4,7 +4,7 @@ Class MLpipeline.PredictionService Extends %RegisteredObject
 /*
 Extracts data from IRIS for prediction based on the input filters. The filters should be a valid SQL WHERE clause without the 'WHERE' keyword.
 e.g:
-    set df = ##class(MLpipeline.PredictionService).PredDataExtraction("datetime > '2026-02-26 17:50:00'")
+    set df = ##class(MLpipeline.PredictionService).PredDataExtraction("datetime > '2026-05-14 00:00:00'")
 */
 ClassMethod PredDataExtraction(filters As %String = "") As %SYS.Python [ Language = python ]
 {
@@ -95,7 +95,7 @@ ClassMethod SavePredictions(model As %SYS.Python, indf As %SYS.Python, ypreds As
 /*
 Predicts over the data specified by the filters using the current model in production and saves the predictions back to IRIS. The filters should be a valid SQL WHERE clause without the 'WHERE' keyword.
 e.g:
-    set predictionsjson = ##class(MLpipeline.PredictionService).Predict("datetime > '2026-02-26 17:50:00'")
+    set predictionsjson = ##class(MLpipeline.PredictionService).Predict("datetime > '2026-05-14 00:00:00'")
 */
 ClassMethod Predict(filters As %String = "") As %String [ Language = python ]
 {

@@ -69,7 +69,7 @@ Method UploadCSVtoIRIS(csvpath As %String, namespace As %String, package As %Str
 Extracts data from IRIS database using SQL query constructed from the input parameters.
 e.g:
    set FS = ##class(MLpipeline.FeatureStore).%New()
-   set rs = FS.DataExtraction("MLpipeline", "PointSamples", "*", "datetime > '2026-02-26 17:50:00'")
+   set rs = FS.DataExtraction("MLpipeline", "PointSamples", "*", "datetime > '2026-05-14 00:00:00'")
 */
 Method DataExtraction(schema As %String, tablename As %String, columns As %String = "*", filters As %String = "") As %SQL.StatementResult
 {

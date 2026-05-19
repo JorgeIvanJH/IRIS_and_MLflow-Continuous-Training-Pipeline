@@ -71,7 +71,7 @@ Method %OnNew(seed As %Integer = 42, testSize As %Numeric(SCALE = 2) = 0.2, numC
     Try {
 
         Do ##class(%SYS.System).WriteToConsoleLog("Initializing MLpipeline.AutomatedPipeline instance.", 0, 0)
-        
+
         Set ..SEED = seed
         Set ..TESTSIZE = testSize
         Set ..NUMCVSPLITS = numCVSplits
@@ -118,7 +118,7 @@ Method %OnNew(seed As %Integer = 42, testSize As %Numeric(SCALE = 2) = 0.2, numC
 Leverages the FeatureStore to extract data and transform it to pandas DataFrame.
 e.g:
     set AP = ##class(MLpipeline.AutomatedPipeline).%New()
-    set df = AP.DataExtraction("2026-02-26 17:50:00")
+    set df = AP.DataExtraction("2026-05-14 00:00:00")
 */
 Method DataExtraction(datetimestr As %String) As %SYS.Python [ Language = python ]
 {
@@ -148,7 +148,7 @@ Method DataExtraction(datetimestr As %String) As %SYS.Python [ Language = python
 Validates the extracted DataFrame for missing values and logs the results.
 e.g:
     set AP = ##class(MLpipeline.AutomatedPipeline).%New()
-    set df = AP.DataExtraction("2026-02-26 17:50:00")
+    set df = AP.DataExtraction("2026-05-14 00:00:00")
     set validDf = AP.DataValidation(df)
 */
 Method DataValidation(df As %SYS.Python) As %SYS.Python [ Language = python ]
@@ -167,14 +167,24 @@ Method DataValidation(df As %SYS.Python) As %SYS.Python [ Language = python ]
         missing_columns = [col for col in essential_cols if col not in df.columns]
         if missing_columns:
             iris._SYS.System.WriteToConsoleLog(f"Missing essential columns in DataFrame: {missing_columns}", 0, 2)
+            return None
         
-        # Data types check (e.g., ensure "x" and "y" are numeric)
+        # Data types checks
         for col in essential_cols:
-            if col in df.columns and not pd.api.types.is_numeric_dtype(df[col]):
+            # Numeric columns
+            if col in ["x", "y"] and not pd.api.types.is_numeric_dtype(df[col]):
                 iris._SYS.System.WriteToConsoleLog(f"Column '{col}' has incorrect data type. Expected numeric.", 0, 2)
+            # Character columns
+            if col == "label" and not pd.api.types.is_object_dtype(df[col]):
+                iris._SYS.System.WriteToConsoleLog(f"Column '{col}' has incorrect data type. Expected character.", 0, 2)
+            # Datetime columns
+            if col == "datetime" and not pd.api.types.is_datetime64_any_dtype(df[col]):
+                iris._SYS.System.WriteToConsoleLog(f"Column '{col}' has incorrect data type. Expected datetime.", 0, 2)
 
         # Significant outliers (e.g., using IQR method)
         for col in essential_cols:
+            if not pd.api.types.is_numeric_dtype(df[col]):
+                continue
             df_col = df[col]
             Q1 = df_col.quantile(0.25)
             Q3 = df_col.quantile(0.75)
@@ -196,7 +206,7 @@ Method DataValidation(df As %SYS.Python) As %SYS.Python [ Language = python ]
 Prepares the validated DataFrame for model training. All non-learned transforms (renames, type casting, no .fit() transformations) should be implemented here.
 e.g:
     set AP = ##class(MLpipeline.AutomatedPipeline).%New()
-    set df = AP.DataExtraction("2026-02-26 17:50:00")
+    set df = AP.DataExtraction("2026-05-14 00:00:00")
     set validDf = AP.DataValidation(df)
     set crossvalidator = AP.DataPreparation(validDf)
 */
@@ -255,7 +265,7 @@ Method DataPreparation(df As %SYS.Python) As %SYS.Python [ Language = python ]
 Trains a machine learning model (e.g., LinearRegression) using the prepared data and specified parameters. Every learned transformation that requires a .fit() should be implemented here (e.g., StandardScaler, PCA, etc.).
 e.g:
     set AP = ##class(MLpipeline.AutomatedPipeline).%New()
-    set df = AP.DataExtraction("2026-02-26 17:50:00")
+    set df = AP.DataExtraction("2026-05-14 00:00:00")
     set validDf = AP.DataValidation(df)
     set crossvalidator, Xtest, Ytest = AP.DataPreparation(validDf)
     set model = AP.ModelTraining(crossvalidator)
@@ -419,7 +429,7 @@ Method ModelTraining(crossvalidator As %SYS.Python) As %SYS.Python [ Language = 
 Evaluates the trained model using the test data and returns performance metrics (e.g., F1 score, MAE, R2, etc.). Also creates SHAP explanations and logs them as artifacts in MLflow along with custom metrics and plots.
 e.g:
     set AP = ##class(MLpipeline.AutomatedPipeline).%New()
-    set df = AP.DataExtraction("2026-02-26 17:50:00")
+    set df = AP.DataExtraction("2026-05-14 00:00:00")
     set validDf = AP.DataValidation(df)
     set crossvalidator, Xtest, Ytest = AP.DataPreparation(validDf)
     set model = AP.ModelTraining(crossvalidator)
@@ -531,7 +541,7 @@ Compares performance to the current production model, and logs the results.
 Returns the best model's run ID for promotion.
 e.g:
     set AP = ##class(MLpipeline.AutomatedPipeline).%New()
-    set df = AP.DataExtraction("2026-02-26 17:50:00")
+    set df = AP.DataExtraction("2026-05-14 00:00:00")
     set validDf = AP.DataValidation(df)
     set crossvalidator, Xtest, Ytest = AP.DataPreparation(validDf)
     set model = AP.ModelTraining(crossvalidator)
@@ -594,7 +604,7 @@ Method ModelValidation(newmodelmetrics As %SYS.Python, Xtest As %SYS.Python, Yte
 Runs the entire ML pipeline sequentially. Handles Each component's try/except.
 e.g:
     set AP = ##class(MLpipeline.AutomatedPipeline).%New()
-    set summary = AP.RunPipeline("2026-02-26 17:50:00")
+    set summary = AP.RunPipeline("2026-05-14 00:00:00")
 */
 Method RunPipeline(datetimestr As %String) As %SYS.Python [ Language = python ]
 {

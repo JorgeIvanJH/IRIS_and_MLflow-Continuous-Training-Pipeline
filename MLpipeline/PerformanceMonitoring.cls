@@ -48,7 +48,7 @@ Gets Ground Truth and Predictions from IRIS tables, and processes for performanc
 Analysis is done only on points where ground truth is available.
 e.g:
     set PM = ##class(MLpipeline.PerformanceMonitoring).%New()
-    set tables = PM.FetchTables("2026-02-26 17:50:00")
+    set tables = PM.FetchTables("2026-05-14 00:00:00")
 */
 Method FetchTables(fromdatetime As %String) As %SYS.Python [ Language = python ]
 {
@@ -84,7 +84,7 @@ Method FetchTables(fromdatetime As %String) As %SYS.Python [ Language = python ]
 Triggers the retraining pipeline if performance degradation is detected based on the F1 score.
 e.g:
     set PM = ##class(MLpipeline.PerformanceMonitoring).%New()
-    set status = PM.Trigger(0.15, "2026-02-26 17:50:00")
+    set status = PM.Trigger(0.15, "2026-05-14 00:00:00")
 */
 Method Trigger(f1 As %Numeric, fromdatetime As %String) As %Status [ Language = python ]
 {
@@ -104,7 +104,7 @@ Method Trigger(f1 As %Numeric, fromdatetime As %String) As %Status [ Language = 
 Makes model evaluation and logs metrics and custom plots to MLflow.
 e.g:
     set PM = ##class(MLpipeline.PerformanceMonitoring).%New()
-    set status = PM.MetricsMonitoring("2026-02-26 17:50:00")
+    set status = PM.MetricsMonitoring("2026-05-14 00:00:00")
 */
 Method MetricsMonitoring(fromdatetime As %String) As %Status [ Language = python ]
 {
