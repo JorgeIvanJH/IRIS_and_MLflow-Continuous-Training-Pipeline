@@ -208,13 +208,17 @@ e.g:
     set AP = ##class(MLpipeline.AutomatedPipeline).%New()
     set df = AP.DataExtraction("2026-05-14 00:00:00")
     set validDf = AP.DataValidation(df)
-    set crossvalidator = AP.DataPreparation(validDf)
+    set result = AP.DataPreparation(validDf)
+    set crossvalidator = result."__getitem__"(0)
+    set Xtest = result."__getitem__"(1)
+    set Ytest = result."__getitem__"(2)
 */
 Method DataPreparation(df As %SYS.Python) As %SYS.Python [ Language = python ]
 {
     import iris
     import pandas as pd
-    from sklearn.model_selection import train_test_split, StratifiedGroupKFold, cross_val_score
+    from sklearn.model_selection import train_test_split, StratifiedGroupKFold, cross_val_score, GroupShuffleSplit
+    
     
     try:
         # Feature engineering
@@ -254,7 +258,7 @@ Method DataPreparation(df As %SYS.Python) As %SYS.Python [ Language = python ]
                 n_jobs=1,) # Warning: avoid nested parallelism among Optuna trials, cross-validation, and model training. We use n_jobs > 1 only for Optuna trials
 
         iris._SYS.System.WriteToConsoleLog("Method for Cross-Validation completed.", 0, 0)
-        return crossvalidator, Xtest, Ytest
+        return (crossvalidator, Xtest, Ytest)
     except Exception as e:
         print(f"DataPreparation Error: {str(e)}")
         iris._SYS.System.WriteToConsoleLog(f"DataPreparation Error: {str(e)}", 0, 2)
@@ -267,7 +271,10 @@ e.g:
     set AP = ##class(MLpipeline.AutomatedPipeline).%New()
     set df = AP.DataExtraction("2026-05-14 00:00:00")
     set validDf = AP.DataValidation(df)
-    set crossvalidator, Xtest, Ytest = AP.DataPreparation(validDf)
+    set result = AP.DataPreparation(validDf)
+    set crossvalidator = result."__getitem__"(0)
+    set Xtest = result."__getitem__"(1)
+    set Ytest = result."__getitem__"(2)
     set model = AP.ModelTraining(crossvalidator)
 */
 Method ModelTraining(crossvalidator As %SYS.Python) As %SYS.Python [ Language = python ]
@@ -431,7 +438,10 @@ e.g:
     set AP = ##class(MLpipeline.AutomatedPipeline).%New()
     set df = AP.DataExtraction("2026-05-14 00:00:00")
     set validDf = AP.DataValidation(df)
-    set crossvalidator, Xtest, Ytest = AP.DataPreparation(validDf)
+    set result = AP.DataPreparation(validDf)
+    set crossvalidator = result."__getitem__"(0)
+    set Xtest = result."__getitem__"(1)
+    set Ytest = result."__getitem__"(2)
     set model = AP.ModelTraining(crossvalidator)
     set newmodelmetrics = AP.ModelEvaluation(model, Xtest, Ytest)
 */
@@ -543,7 +553,10 @@ e.g:
     set AP = ##class(MLpipeline.AutomatedPipeline).%New()
     set df = AP.DataExtraction("2026-05-14 00:00:00")
     set validDf = AP.DataValidation(df)
-    set crossvalidator, Xtest, Ytest = AP.DataPreparation(validDf)
+    set result = AP.DataPreparation(validDf)
+    set crossvalidator = result."__getitem__"(0)
+    set Xtest = result."__getitem__"(1)
+    set Ytest = result."__getitem__"(2)
     set model = AP.ModelTraining(crossvalidator)
     set newmodelmetrics = AP.ModelEvaluation(model, Xtest, Ytest)
     set bestrunid = AP.ModelValidation(newmodelmetrics, Xtest, Ytest)
