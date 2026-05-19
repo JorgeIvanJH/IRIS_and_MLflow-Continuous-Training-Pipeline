@@ -33,7 +33,7 @@ s version="latest" s r=##class(%Net.HttpRequest).%New(),r.Server="pm.community.i
 Write "Installing IPM packages...",!
 zpm
 repo -r -n registry -url https://pm.community.intersystems.com/ -user "" -pass ""
-install csvgenpy
+# install csvgenpy 1.2.5 # This is an example to show how to install additional packages if needed, currently not used in the pipeline. WARNING: Be aware thet packages installed via IPM might overwrite existing python dependencies in IRIS
 quit
 
 Write "Changing to USER namespace for project configuration...",!
@@ -52,14 +52,14 @@ IF 'exists { do ##class(MLpipeline.FeatureStore).%New().CreatePredictionsTable("
 
 Write "Running First ML Pipeline execution...",!
 set AP = ##class(MLpipeline.AutomatedPipeline).%New()
-set summary = AP.RunPipeline("2026-02-26 17:50:00")
+set summary = AP.RunPipeline("2026-05-14 00:00:00")
 
 Write "Running First Prediction Service execution...",!
-set predictionsjson = ##class(MLpipeline.PredictionService).Predict("datetime > '2026-02-26 17:50:00'")
+set predictionsjson = ##class(MLpipeline.PredictionService).Predict("datetime > '2026-05-14 00:00:00'")
 
 Write "Running First Performance Monitoring execution...",!
 set PM = ##class(MLpipeline.PerformanceMonitoring).%New()
-set status = PM.MetricsMonitoring("2026-02-26 17:50:00")
+set status = PM.MetricsMonitoring("2026-05-14 00:00:00")
 
 
 Write "IRIS CONFIGURATION COMPLETED.",!

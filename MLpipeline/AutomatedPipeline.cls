@@ -61,7 +61,7 @@ ClassMethod ListToDynamicArray(list As %List) As %DynamicArray
 /*
 Set default values of parameters when a new instance of AutomatedPipeline is created.
 e.g:
-    set AP = ##class(MLpipeline.AutomatedPipeline).%New()
+    set AP = ##class(MLpipeline.AutomatedPipeline).%New(42, 0.2, 5, 100, 16)
 */
 Method %OnNew(seed As %Integer = 42, testSize As %Numeric(SCALE = 2) = 0.2, numCVSplits As %Integer = 5, numTrials As %Integer = 100, numWorkers As %Integer = 1, lrrange As %List = "", mdrange As %List = "", nerange As %List = "", nlrange As %List = "") As %Status [ Private ]
 {
@@ -117,7 +117,7 @@ Method %OnNew(seed As %Integer = 42, testSize As %Numeric(SCALE = 2) = 0.2, numC
 /*
 Leverages the FeatureStore to extract data and transform it to pandas DataFrame.
 e.g:
-    set AP = ##class(MLpipeline.AutomatedPipeline).%New()
+    set AP = ##class(MLpipeline.AutomatedPipeline).%New(42, 0.2, 5, 100, 16)
     set df = AP.DataExtraction("2026-05-14 00:00:00")
 */
 Method DataExtraction(datetimestr As %String) As %SYS.Python [ Language = python ]
@@ -147,7 +147,7 @@ Method DataExtraction(datetimestr As %String) As %SYS.Python [ Language = python
 /*
 Validates the extracted DataFrame for missing values and logs the results.
 e.g:
-    set AP = ##class(MLpipeline.AutomatedPipeline).%New()
+    set AP = ##class(MLpipeline.AutomatedPipeline).%New(42, 0.2, 5, 100, 16)
     set df = AP.DataExtraction("2026-05-14 00:00:00")
     set validDf = AP.DataValidation(df)
 */
@@ -205,13 +205,15 @@ Method DataValidation(df As %SYS.Python) As %SYS.Python [ Language = python ]
 /* 
 Prepares the validated DataFrame for model training. All non-learned transforms (renames, type casting, no .fit() transformations) should be implemented here.
 e.g:
-    set AP = ##class(MLpipeline.AutomatedPipeline).%New()
+    set AP = ##class(MLpipeline.AutomatedPipeline).%New(42, 0.2, 5, 100, 16)
     set df = AP.DataExtraction("2026-05-14 00:00:00")
     set validDf = AP.DataValidation(df)
     set result = AP.DataPreparation(validDf)
     set crossvalidator = result."__getitem__"(0)
-    set Xtest = result."__getitem__"(1)
-    set Ytest = result."__getitem__"(2)
+    set Xtrainval = result."__getitem__"(1)
+    set Ytrainval = result."__getitem__"(2)
+    set Xtest = result."__getitem__"(3)
+    set Ytest = result."__getitem__"(4)
 */
 Method DataPreparation(df As %SYS.Python) As %SYS.Python [ Language = python ]
 {
@@ -258,7 +260,7 @@ Method DataPreparation(df As %SYS.Python) As %SYS.Python [ Language = python ]
                 n_jobs=1,) # Warning: avoid nested parallelism among Optuna trials, cross-validation, and model training. We use n_jobs > 1 only for Optuna trials
 
         iris._SYS.System.WriteToConsoleLog("Method for Cross-Validation completed.", 0, 0)
-        return (crossvalidator, Xtest, Ytest)
+        return (crossvalidator, Xtrainval, Ytrainval, Xtest, Ytest)
     except Exception as e:
         print(f"DataPreparation Error: {str(e)}")
         iris._SYS.System.WriteToConsoleLog(f"DataPreparation Error: {str(e)}", 0, 2)
@@ -268,31 +270,38 @@ Method DataPreparation(df As %SYS.Python) As %SYS.Python [ Language = python ]
 /*
 Trains a machine learning model (e.g., LinearRegression) using the prepared data and specified parameters. Every learned transformation that requires a .fit() should be implemented here (e.g., StandardScaler, PCA, etc.).
 e.g:
-    set AP = ##class(MLpipeline.AutomatedPipeline).%New()
+    set AP = ##class(MLpipeline.AutomatedPipeline).%New(42, 0.2, 5, 100, 16)
     set df = AP.DataExtraction("2026-05-14 00:00:00")
     set validDf = AP.DataValidation(df)
     set result = AP.DataPreparation(validDf)
     set crossvalidator = result."__getitem__"(0)
-    set Xtest = result."__getitem__"(1)
-    set Ytest = result."__getitem__"(2)
-    set model = AP.ModelTraining(crossvalidator)
+    set Xtrainval = result."__getitem__"(1)
+    set Ytrainval = result."__getitem__"(2)
+    set Xtest = result."__getitem__"(3)
+    set Ytest = result."__getitem__"(4)
+    set model = AP.ModelTraining(Xtrainval, Ytrainval, crossvalidator)
 */
-Method ModelTraining(crossvalidator As %SYS.Python) As %SYS.Python [ Language = python ]
+Method ModelTraining(Xtrainval As %SYS.Python, Ytrainval As %SYS.Python, crossvalidator As %SYS.Python) As %SYS.Python [ Language = python ]
 {
-
-
-
-    
     import os
     import json
     import iris
     import pandas as pd
     import mlflow
     import mlflow.sklearn
+    from mlflow.models.signature import infer_signature
     import datetime as dt
+    import optuna
+    import lightgbm as lgb
+    from urllib.parse import quote_plus
     from sklearn.preprocessing import StandardScaler
     from sklearn.pipeline import Pipeline
     from sklearn.metrics import mean_absolute_error, r2_score
+
+    def parse_os_dict(os_dict):
+        json_text = os_dict._ToJSON()
+        p_dict = json.loads(json_text)
+        return p_dict
 
     class Objective:
         """
@@ -314,18 +323,16 @@ Method ModelTraining(crossvalidator As %SYS.Python) As %SYS.Python [ Language = 
 
         def __call__(self, trial):
 
-
             params = {
                 "learning_rate": trial.suggest_float("learning_rate", *self.paramranges["learning_rate"], log=True),
                 "max_depth": trial.suggest_int("max_depth", *self.paramranges["max_depth"]),
                 "n_estimators": trial.suggest_int("n_estimators", *self.paramranges["n_estimators"]),
-                "num_leaves": trial.suggest_int("num_leaves", *self.paramranges["num_leaves"]),
+                "num_leaves": trial.suggest_categorical("num_leaves", self.paramranges["num_leaves"]),
                 "max_bin": trial.suggest_categorical("max_bin", self.paramranges["max_bin"]),
                 "random_state": self.paramranges["random_state"],
                 "verbosity": self.paramranges["verbosity"],
                 "n_jobs": self.paramranges["n_jobs"],
             }
-
             # Get MLflow parent run ID for nested logging
             MLflowParentRun = iris.gref("^MLflowParentRun")
             parent_run_id = MLflowParentRun["RunID"]
@@ -333,7 +340,7 @@ Method ModelTraining(crossvalidator As %SYS.Python) As %SYS.Python [ Language = 
             with mlflow.start_run(
                 run_name=f"trial_{trial.number}",
                 nested=True, parent_run_id=parent_run_id) as child_run:
-                scores = self.crossvalidator(self.pipeline(**params))
+                scores = self.crossvalidator(self.pipeline(params))
                 crossval_score = scores.mean()
                 # Logging metrics
                 for fold_idx, score in enumerate(scores):
@@ -376,12 +383,11 @@ Method ModelTraining(crossvalidator As %SYS.Python) As %SYS.Python [ Language = 
             study = optuna.create_study(
                 direction="maximize",
                 study_name=STUDY_NAME,
-                storage="sqlite:///optuna_lgbm.db",  # TODO: avoid using this one
+                storage=optuna.storages.InMemoryStorage(),
                 load_if_exists=False,
             )
-            
             # Parse Parameters
-            paramsranges = self.MODELPARAMRANGES
+            paramsranges = parse_os_dict(self.MODELPARAMRANGES)
             iris._SYS.System.WriteToConsoleLog(f"ModelTraining received parameter ranges: {paramsranges}", 0, 0)
 
             # Run Optuna optimization
@@ -389,7 +395,7 @@ Method ModelTraining(crossvalidator As %SYS.Python) As %SYS.Python [ Language = 
                 n_trials=self.NUMTRIALS,
                 n_jobs=self.NUMWORKERS
                 )
-            iris._SYS.System.WriteToConsoleLog(f"Optuna optimization completed. Best trial: {study.best_trial.number} with value: {study.best_value}", 0, 0)
+            iris._SYS.System.WriteToConsoleLog(f"Optuna optimization completed. Best trial: {study.best_trial.number} with value: {study.best_value} and parameters: {study.best_trial.params}", 0, 0)
 
             # Logging best trial's parameters and metrics to MLflow    
             best_params = study.best_trial.params
@@ -406,16 +412,16 @@ Method ModelTraining(crossvalidator As %SYS.Python) As %SYS.Python [ Language = 
                 **best_params,
                 random_state=self.SEED,
                 verbosity=-1,
-                n_jobs=self.NUMWORKERS,
+                n_jobs=1,
             )
-            final_model.fit(X, y)
-            input_sample = X.sample(100, random_state=self.SEED)
+            final_model.fit(Xtrainval, Ytrainval)
+            input_sample = Xtrainval.sample(100, random_state=self.SEED)
             signature = infer_signature(input_sample, final_model.predict(input_sample))
             mlflow.lightgbm.log_model(
                 lgb_model=final_model,
                 name="best_model",
                 signature=signature,
-                input_example=X.head(5),
+                input_example=Xtrainval.head(5),
             )
             mlflow.lightgbm.save_model(final_model, model_path)
             iris._SYS.System.WriteToConsoleLog("Model training completed successfully.", 0, 0)
@@ -435,14 +441,16 @@ Method ModelTraining(crossvalidator As %SYS.Python) As %SYS.Python [ Language = 
 /*
 Evaluates the trained model using the test data and returns performance metrics (e.g., F1 score, MAE, R2, etc.). Also creates SHAP explanations and logs them as artifacts in MLflow along with custom metrics and plots.
 e.g:
-    set AP = ##class(MLpipeline.AutomatedPipeline).%New()
+    set AP = ##class(MLpipeline.AutomatedPipeline).%New(42, 0.2, 5, 100, 16)
     set df = AP.DataExtraction("2026-05-14 00:00:00")
     set validDf = AP.DataValidation(df)
     set result = AP.DataPreparation(validDf)
     set crossvalidator = result."__getitem__"(0)
-    set Xtest = result."__getitem__"(1)
-    set Ytest = result."__getitem__"(2)
-    set model = AP.ModelTraining(crossvalidator)
+    set Xtrainval = result."__getitem__"(1)
+    set Ytrainval = result."__getitem__"(2)
+    set Xtest = result."__getitem__"(3)
+    set Ytest = result."__getitem__"(4)
+    set model = AP.ModelTraining(Xtrainval, Ytrainval, crossvalidator)
     set newmodelmetrics = AP.ModelEvaluation(model, Xtest, Ytest)
 */
 Method ModelEvaluation(model As %SYS.Python, Xtest As %SYS.Python, Ytest As %SYS.Python) As %SYS.Python [ Language = python ]
@@ -550,14 +558,16 @@ Validation before promoting model to production.
 Compares performance to the current production model, and logs the results.
 Returns the best model's run ID for promotion.
 e.g:
-    set AP = ##class(MLpipeline.AutomatedPipeline).%New()
+    set AP = ##class(MLpipeline.AutomatedPipeline).%New(42, 0.2, 5, 100, 16)
     set df = AP.DataExtraction("2026-05-14 00:00:00")
     set validDf = AP.DataValidation(df)
     set result = AP.DataPreparation(validDf)
     set crossvalidator = result."__getitem__"(0)
-    set Xtest = result."__getitem__"(1)
-    set Ytest = result."__getitem__"(2)
-    set model = AP.ModelTraining(crossvalidator)
+    set Xtrainval = result."__getitem__"(1)
+    set Ytrainval = result."__getitem__"(2)
+    set Xtest = result."__getitem__"(3)
+    set Ytest = result."__getitem__"(4)
+    set model = AP.ModelTraining(Xtrainval, Ytrainval, crossvalidator)
     set newmodelmetrics = AP.ModelEvaluation(model, Xtest, Ytest)
     set bestrunid = AP.ModelValidation(newmodelmetrics, Xtest, Ytest)
 */
@@ -616,7 +626,7 @@ Method ModelValidation(newmodelmetrics As %SYS.Python, Xtest As %SYS.Python, Yte
 /*
 Runs the entire ML pipeline sequentially. Handles Each component's try/except.
 e.g:
-    set AP = ##class(MLpipeline.AutomatedPipeline).%New()
+    set AP = ##class(MLpipeline.AutomatedPipeline).%New(42, 0.2, 5, 100, 16)
     set summary = AP.RunPipeline("2026-05-14 00:00:00")
 */
 Method RunPipeline(datetimestr As %String) As %SYS.Python [ Language = python ]
