@@ -601,10 +601,9 @@ Method ModelValidation(newmodelmetrics As %SYS.Python, Xtest As %SYS.Python, Yte
     import pandas as pd
     from pathlib import Path
     from sklearn.metrics import f1_score
-    from python_utils.utils import plot_inference, safe_model_load
+    from python_utils.utils import safe_model_load
 
     try:
-
 
         # Get newly trained model's run information
         newmodel_run = mlflow.get_run(self.MLFLOWRUNID)
@@ -631,8 +630,6 @@ Method ModelValidation(newmodelmetrics As %SYS.Python, Xtest As %SYS.Python, Yte
             else:
                 iris._SYS.System.WriteToConsoleLog("New model does not outperform the model in production, model in production is kept.", 0, 0)
                 best_run_id = prod_run_id
-            if plotComparison:
-                plot_inference(self, Xtrain, Ytrain, Xtest, Ytest, prodmodel_run, newmodel_run)
         else:
             print("No previous successful run found.")
             iris._SYS.System.WriteToConsoleLog("No model found in production, best model is the newly trained one.", 0, 0)
@@ -674,11 +671,11 @@ Method RunPipeline(datetimestr As %String) As %SYS.Python [ Language = python ]
         # Step 3: Data Preparation
         iris._SYS.System.WriteToConsoleLog("Starting DataPreparation.", 0, 0)
         preparation_result = self.DataPreparation(valid_df)
-        crossvalidator, Xtest, Ytest = preparation_result
+        crossvalidator, Xtrainval, Ytrainval, Xtest, Ytest = preparation_result
 
         # Step 4: Model Training
         iris._SYS.System.WriteToConsoleLog("Starting ModelTraining.", 0, 0)
-        model = self.ModelTraining(Xtrain, Ytrain, self.MODELPARAMS)
+        model = self.ModelTraining(Xtrainval, Ytrainval, crossvalidator)
 
         # Step 5: Model Evaluation
         iris._SYS.System.WriteToConsoleLog("Starting ModelEvaluation.", 0, 0)
