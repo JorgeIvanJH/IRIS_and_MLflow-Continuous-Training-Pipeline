@@ -16,13 +16,15 @@ ClassMethod PredDataExtraction(filters As %String = "") As %SYS.Python [ Languag
         df = IRIS_DBQuery(
             schema="MLpipeline", 
             tablename="PointSamples", 
-            columns="ID, x, y",
+            columns="ID, x, y, label, datetime",
             filters=filters
         )
         return df
     except Exception as e:
-        print(f"PredDataExtraction Error: {str(e)}")
-        iris._SYS.System.WriteToConsoleLog(f"PredDataExtraction Error: {str(e)}", 0, 2)
+        import traceback
+        msg = traceback.format_exc()
+        print(f"PredDataExtraction Error: {msg}")
+        iris._SYS.System.WriteToConsoleLog(f"PredDataExtraction Error: {msg}", 0, 2)
         return pd.DataFrame()
 }
 
@@ -53,8 +55,9 @@ ClassMethod CachedModelLoading() As %SYS.Python [ Language = python ]
 
         return iris.cls(__name__)._cached_model
     except Exception as e:
-        print(f"CachedModelLoading Error: {str(e)}")
-        iris._SYS.System.WriteToConsoleLog(f"CachedModelLoading Error: {str(e)}", 0, 2)
+        msg = traceback.format_exc()
+        print(f"CachedModelLoading Error: {msg}")
+        iris._SYS.System.WriteToConsoleLog(f"CachedModelLoading Error: {msg}", 0, 2)
         return None
 }
 
@@ -87,8 +90,10 @@ ClassMethod SavePredictions(model As %SYS.Python, indf As %SYS.Python, ypreds As
         return True
 
     except Exception as e:
-        print(f"SavePredictions Error: {str(e)}")
-        iris._SYS.System.WriteToConsoleLog(f"SavePredictions Error: {str(e)}", 0, 2)
+        import traceback
+        msg = traceback.format_exc()
+        print(f"SavePredictions Error: {msg}")
+        iris._SYS.System.WriteToConsoleLog(f"SavePredictions Error: {msg}", 0, 2)
         return False
 }
 
@@ -109,7 +114,14 @@ ClassMethod Predict(filters As %String = "") As %String [ Language = python ]
         indf = iris.cls(__name__).PredDataExtraction(filters)
         model = iris.cls(__name__).CachedModelLoading()
         decorated_predict = measure_time_decorator(model.predict)
-        y_preds, pred_time = decorated_predict(indf[["x"]])
+        X = indf[["x", "y"]]
+        X["year"] = indf["datetime"].dt.year
+        X["month"] = indf["datetime"].dt.month
+        X["day"] = indf["datetime"].dt.day
+        X["hour"] = indf["datetime"].dt.hour
+        X["minute"] = indf["datetime"].dt.minute
+        X["second"] = indf["datetime"].dt.second
+        y_preds, pred_time = decorated_predict(X)
         iris.MLpipeline.PredictionService.SavePredictions(model, indf, y_preds, pred_time)
         iris._SYS.System.WriteToConsoleLog(f"Prediction completed in {pred_time:.4f} seconds for {len(indf)} records.", 0, 0)
         return json.dumps(y_preds.tolist() if hasattr(y_preds, 'tolist') else list(y_preds))
