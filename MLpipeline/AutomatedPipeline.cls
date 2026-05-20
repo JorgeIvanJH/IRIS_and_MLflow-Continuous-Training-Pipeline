@@ -139,8 +139,10 @@ Method DataExtraction(datetimestr As %String) As %SYS.Python [ Language = python
         iris._SYS.System.WriteToConsoleLog(f"DataExtraction completed.", 0, 0)
         return df
     except Exception as e:
-        print(f"DataExtraction Error: {str(e)}")
-        iris._SYS.System.WriteToConsoleLog(f"DataExtraction Error: {str(e)}", 0, 2)
+        import traceback
+        msg = traceback.format_exc()
+        print(f"DataExtraction Error: {msg}")
+        iris._SYS.System.WriteToConsoleLog(f"DataExtraction Error: {msg}", 0, 2)
         return None
 }
 
@@ -197,8 +199,10 @@ Method DataValidation(df As %SYS.Python) As %SYS.Python [ Language = python ]
         iris._SYS.System.WriteToConsoleLog("DataValidation completed.", 0, 0)
         return df
     except Exception as e:
-        print(f"DataValidation Error: {str(e)}")
-        iris._SYS.System.WriteToConsoleLog(f"DataValidation Error: {str(e)}", 0, 2)
+        import traceback
+        msg = traceback.format_exc()
+        print(f"DataValidation Error: {msg}")
+        iris._SYS.System.WriteToConsoleLog(f"DataValidation Error: {msg}", 0, 2)
         return None
 }
 
@@ -262,8 +266,10 @@ Method DataPreparation(df As %SYS.Python) As %SYS.Python [ Language = python ]
         iris._SYS.System.WriteToConsoleLog("Method for Cross-Validation completed.", 0, 0)
         return (crossvalidator, Xtrainval, Ytrainval, Xtest, Ytest)
     except Exception as e:
-        print(f"DataPreparation Error: {str(e)}")
-        iris._SYS.System.WriteToConsoleLog(f"DataPreparation Error: {str(e)}", 0, 2)
+        import traceback
+        msg = traceback.format_exc()
+        print(f"DataPreparation Error: {msg}")
+        iris._SYS.System.WriteToConsoleLog(f"DataPreparation Error: {msg}", 0, 2)
         return None
 }
 
@@ -366,7 +372,7 @@ Method ModelTraining(Xtrainval As %SYS.Python, Ytrainval As %SYS.Python, crossva
         tracking_uri = os.getenv("MLFLOW_TRACKING_URI")
         mlflow.set_tracking_uri(os.getenv("MLFLOW_TRACKING_URI_IRIS"))
         mlflow.set_experiment(self._GetParameter("EXPERIMENTNAME"))
-        mlflow.sklearn.autolog()
+        #; mlflow.sklearn.autolog()
 
 
         with mlflow.start_run(run_id=self.MLFLOWRUNID, run_name=RUN_NAME, log_system_metrics=True) as parent_run:
@@ -426,6 +432,11 @@ Method ModelTraining(Xtrainval As %SYS.Python, Ytrainval As %SYS.Python, crossva
             mlflow.lightgbm.save_model(final_model, model_path)
             iris._SYS.System.WriteToConsoleLog("Model training completed successfully.", 0, 0)
 
+            # TODO: Log dataset used for training
+            #; trainval_data = Xtrainval.copy()
+            #; trainval_data["label"] = Ytrainval
+            #; mlflow.log_input(trainval_data, context="training")
+
             # Tag successful training for future identification of runs
             mlflow.set_tag("TrainingStatus", "OK")
             self.MODEL = final_model
@@ -433,8 +444,10 @@ Method ModelTraining(Xtrainval As %SYS.Python, Ytrainval As %SYS.Python, crossva
             return final_model
 
     except Exception as e:
-        print(f"ModelTraining Error: {str(e)}")
-        iris._SYS.System.WriteToConsoleLog(f"ModelTraining Error: {str(e)}", 0, 2)
+        import traceback
+        msg = traceback.format_exc()
+        print(f"ModelTraining Error: {msg}")
+        iris._SYS.System.WriteToConsoleLog(f"ModelTraining Error: {msg}", 0, 2)
         return None
 }
 
@@ -482,11 +495,11 @@ Method ModelEvaluation(model As %SYS.Python, Xtest As %SYS.Python, Ytest As %SYS
 
         fig, axes = plt.subplots(1, 2, figsize=(12, 5), sharex=True, sharey=True)
         for label, color in color_map.items():
-            actual = eval_df[eval_df.get("label") == label]
+            actual = eval_df[eval_df["target"] == label]
             if not actual.empty:
                 axes[0].scatter(actual.get("x"), actual.get("y"), s=12, c=color, label=label, alpha=0.7)
 
-            predicted = eval_df[eval_df.get("pred") == label]
+            predicted = eval_df[eval_df["prediction"] == label]
             if not predicted.empty:
                 axes[1].scatter(predicted.get("x"), predicted.get("y"), s=12, c=color, label=label, alpha=0.7)
 
@@ -510,7 +523,7 @@ Method ModelEvaluation(model As %SYS.Python, Xtest As %SYS.Python, Ytest As %SYS
     try:
         mlflow.set_tracking_uri(os.getenv("MLFLOW_TRACKING_URI_IRIS"))
         mlflow.set_experiment(self._GetParameter("EXPERIMENTNAME"))
-        mlflow.lightgbm.autolog()
+        #; mlflow.lightgbm.autolog()
 
         custom_metric = make_metric(eval_fn=custom_metric, greater_is_better=True, name="custom_metric")
 
@@ -548,8 +561,10 @@ Method ModelEvaluation(model As %SYS.Python, Xtest As %SYS.Python, Ytest As %SYS
             return metrics
 
     except Exception as e:
-        print(f"ModelEvaluation Error: {str(e)}", e)
-        iris._SYS.System.WriteToConsoleLog(f"ModelEvaluation Error: {str(e)}", 0, 2)
+        import traceback
+        msg = traceback.format_exc()
+        print(f"ModelEvaluation Error: {msg}", e)
+        iris._SYS.System.WriteToConsoleLog(f"ModelEvaluation Error: {msg}", 0, 2)
         return None
 }
 
@@ -618,8 +633,10 @@ Method ModelValidation(newmodelmetrics As %SYS.Python, Xtest As %SYS.Python, Yte
         
         return best_run_id
     except Exception as e:
-        print(f"ModelValidation Error: {str(e)}")
-        iris._SYS.System.WriteToConsoleLog(f"ModelValidation Error: {str(e)}", 0, 2)
+        import traceback
+        msg = traceback.format_exc()
+        print(f"ModelValidation Error: {msg}")
+        iris._SYS.System.WriteToConsoleLog(f"ModelValidation Error: {msg}", 0, 2)
         return None
 }
 
@@ -676,8 +693,10 @@ Method RunPipeline(datetimestr As %String) As %SYS.Python [ Language = python ]
         }
 
     except Exception as e:
-        print("Error during Pipeline Execution:", e)
-        iris._SYS.System.WriteToConsoleLog(f"Pipeline Execution Error: {str(e)}", 0, 2)
+        import traceback
+        msg = traceback.format_exc()
+        print(f"RunPipeline Error: {msg}")
+        iris._SYS.System.WriteToConsoleLog(f"RunPipeline Error: {msg}", 0, 2)
         return {
             "MLFLOW_RUN_ID": self.MLFLOWRUNID,
             "Best_Model_Run_ID": None,
