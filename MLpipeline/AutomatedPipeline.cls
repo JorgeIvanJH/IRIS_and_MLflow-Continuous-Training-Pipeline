@@ -490,16 +490,23 @@ Method ModelEvaluation(model As %SYS.Python, Xtest As %SYS.Python, Ytest As %SYS
         return MetricValue(aggregate_results={"custom_metric": custom_value})
 
     def custom_plot(eval_df, builtin_metrics, artifacts_dir):
-        """placeholder for a custom plotting function to be logged later"""
+        """
+        Custom plotting function logged as an MLflow artifact.
+        We need local reference to Xtest for the x and y coordinates because eval_df only contains the predictions and targets when passed to MLflow.
+        """
         color_map = {'a': 'blue', 'b': 'yellow', 'c': 'green', 'd': 'red'}
-
+        plot_df = eval_df.copy().reset_index(drop=True)
+        # Reattach coordinates from the original test data.
+        coords = Xtest[["x", "y"]].copy().reset_index(drop=True)
+        plot_df["x"] = coords["x"]
+        plot_df["y"] = coords["y"]
         fig, axes = plt.subplots(1, 2, figsize=(12, 5), sharex=True, sharey=True)
         for label, color in color_map.items():
-            actual = eval_df[eval_df["target"] == label]
+            actual = plot_df[plot_df["target"] == label]
             if not actual.empty:
                 axes[0].scatter(actual.get("x"), actual.get("y"), s=12, c=color, label=label, alpha=0.7)
 
-            predicted = eval_df[eval_df["prediction"] == label]
+            predicted = plot_df[plot_df["prediction"] == label]
             if not predicted.empty:
                 axes[1].scatter(predicted.get("x"), predicted.get("y"), s=12, c=color, label=label, alpha=0.7)
 
