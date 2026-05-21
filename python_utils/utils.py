@@ -70,6 +70,7 @@ def safe_model_load(model_path: str):
 
     try:
         model = mlflow.lightgbm.load_model(model_path)
+        model.mlflow_model_info = mlflow.models.get_model_info(model_path)
         return model
     except Exception as e:
         print(f"Error loading model from {model_path}: {str(e)}")
@@ -93,6 +94,7 @@ def safe_model_load(model_path: str):
                     0,
                 )
                 model = mlflow.lightgbm.load_model(model_path)
+                model.mlflow_model_info = mlflow.models.get_model_info(model_path)
                 return model
             except Exception as e:
                 print(

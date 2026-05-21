@@ -429,7 +429,12 @@ Method ModelTraining(Xtrainval As %SYS.Python, Ytrainval As %SYS.Python, crossva
                 signature=signature,
                 input_example=Xtrainval.head(5),
             )
-            mlflow.lightgbm.save_model(final_model, model_path)
+            mlflow.lightgbm.save_model(
+                final_model, 
+                model_path,
+                signature=signature,
+                metadata={"run_id": parent_run.info.run_id},
+                )
             iris._SYS.System.WriteToConsoleLog("Model training completed successfully.", 0, 0)
 
             # TODO: Log dataset used for training

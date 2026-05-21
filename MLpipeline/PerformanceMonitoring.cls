@@ -66,17 +66,19 @@ Method FetchTables(fromdatetime As %String) As %SYS.Python [ Language = python ]
             columns="id, x, y, label, datetime",
             filters=f"datetime >= '{safe_literal}' AND datetime <= '{self.CURRENTDATETIME}'"
         )
-        points_w_groundtruth = PointSamples_df.loc[PointSamples_df["y"].notna(), "id"]
+        points_w_groundtruth = PointSamples_df.loc[PointSamples_df["label"].notna(), "id"]
         Predictions_df = IRIS_DBQuery(
             schema="MLpipeline", 
             tablename="Predictions", 
-            columns="id, pointsidforeignkey, ypred, modelrunid, inferencetime, datetime",
+            columns="id, pointsidforeignkey, labelpred, modelrunid, inferencetime, datetime",
             filters=f"pointsidforeignkey IN {tuple(points_w_groundtruth)}"
         )
         return PointSamples_df, Predictions_df
     except Exception as e:
-        print(f"FetchTables Error: {str(e)}")
-        #; iris._SYS.System.WriteToConsoleLog(f"FetchTables Error: {str(e)}", 0, 2)
+        import traceback
+        msg = traceback.format_exc()
+        print(f"FetchTables Error: {msg}")
+        #; iris._SYS.System.WriteToConsoleLog(f"FetchTables Error: {msg}", 0, 2)
         return pd.DataFrame(), pd.DataFrame()
 }
 
@@ -84,7 +86,7 @@ Method FetchTables(fromdatetime As %String) As %SYS.Python [ Language = python ]
 Triggers the retraining pipeline if performance degradation is detected based on the F1 score.
 e.g:
     set PM = ##class(MLpipeline.PerformanceMonitoring).%New()
-    set status = PM.Trigger(0.15, "2026-05-14 00:00:00")
+    set status = PM.Trigger(0.7, "2026-05-14 00:00:00")
 */
 Method Trigger(f1 As %Numeric, fromdatetime As %String) As %Status [ Language = python ]
 {
@@ -117,39 +119,69 @@ Method MetricsMonitoring(fromdatetime As %String) As %Status [ Language = python
     import matplotlib.pyplot as plt
     import seaborn as sns
 
+    #; def custom_plot(PointSamples_df, Predictions_df):
+    #;     print("PointSamples_df.head():", PointSamples_df.head())
+    #;     print("Predictions_df.head():", Predictions_df.head())
+    #;     color_map = {'a': 'blue', 'b': 'yellow', 'c': 'green', 'd': 'red'} # TODO have this in feature store
+    #;     eachmodelspred = Predictions_df.pivot_table(index="pointsidforeignkey", columns="modelrunid", values="labelpred", aggfunc="count")
+    #;     merged_df = pd.merge(PointSamples_df, eachmodelspred, left_on="id", right_on="pointsidforeignkey", how="left")
+    #;     modelnames = [col for col in merged_df.columns if col not in PointSamples_df.columns]
+    #;     print("merged_df.head():", merged_df.head())
+    #;     print("modelnames:", modelnames)
 
+    #;     # Create subplots - one for each drawing
+    #;     datetimes = merged_df["datetime"].unique() # Each drawing has unique datetimes
+    #;     num_drawings = len(datetimes)
+    #;     fig, axes = plt.subplots(num_drawings, 1, figsize=(12, 6 * num_drawings), sharex=True)
 
-    def custom_plot(PointSamples_df, Predictions_df):
-        eachmodelspred = Predictions_df.pivot_table(index="pointsidforeignkey", columns="modelrunid", values="ypred", aggfunc="mean")
-        merged_df = pd.merge(PointSamples_df, eachmodelspred, left_on="id", right_on="pointsidforeignkey", how="left")
-        modelnames = [col for col in merged_df.columns if col not in PointSamples_df.columns]
-        fig, ax = plt.subplots(figsize=(12, 6))
-        for colname in modelnames + ["y"]:
-            sns.scatterplot(data=merged_df, x="x", y=colname, label=str(colname), ax=ax)
-        ax.set_xlim(0, 200)
-        ax.set_ylim(0, 200)
-        ax.set_title("Predictions Over Time by Model Run")
-        ax.set_xlabel("Datetime")
-        ax.set_ylabel("Y")
-        ax.legend(title="Model Run id")
-        ax.grid(True)
-        fig.tight_layout()
+    #;     # Plotting predictions from each model run
+    #;     for idx in range(num_drawings):
+    #;         ax = axes[idx] if num_drawings > 1 else axes
+    #;         drawing_data = merged_df[merged_df["datetime"] == datetimes[idx]]
+    #;         for model in modelnames:
+    #;             if model in drawing_data.columns:
+    #;                 sns.scatterplot(data=drawing_data, x="x", y="y", hue=model, palette=color_map, ax=ax, legend="full", s=100)
+    #;         sns.scatterplot(data=drawing_data, x="x", y="y", hue="label", palette=color_map, ax=ax, legend=False, s=200, marker="X")
+    #;         ax.set_title(f"Predictions vs Ground Truth for Drawing at {datetimes[idx]}")
 
-        return fig
+    #;     return fig
 
     try:
         PointSamples_df, Predictions_df = self.FetchTables(fromdatetime)
         if PointSamples_df.empty or Predictions_df.empty:
             print("No data available for metrics monitoring.")
             return False
-        models_last_datetime = Predictions_df.groupby("modelrunid").agg({"datetime":max})
+        models_last_datetime = Predictions_df.groupby("modelrunid").agg({"datetime": max})
         latest_model = models_last_datetime["datetime"].idxmax()
-        latest_active_predictions = Predictions_df[Predictions_df["modelrunid"] == latest_model].groupby("pointsidforeignkey").agg({"ypred": "mean", "inferencetime": "mean"}).reset_index()
-        latest_active_predictions = pd.merge(latest_active_predictions, PointSamples_df[["id", "y"]], left_on="pointsidforeignkey", right_on="id", how="left")
+
+        latest_active_predictions = (
+            Predictions_df[Predictions_df["modelrunid"] == latest_model]
+            .groupby("pointsidforeignkey")
+            .agg({
+                "labelpred": "first",
+                "inferencetime": "mean"
+            })
+            .reset_index()
+        )
+
+        latest_active_predictions = pd.merge(
+            latest_active_predictions,
+            PointSamples_df[["id", "label"]],
+            left_on="pointsidforeignkey",
+            right_on="id",
+            how="left"
+        )
+
+        latest_active_predictions = latest_active_predictions.dropna(
+            subset=["label", "labelpred"]
+        )
+
+        latest_active_predictions["label"] = latest_active_predictions["label"].astype(str)
+        latest_active_predictions["labelpred"] = latest_active_predictions["labelpred"].astype(str)
 
         with mlflow.start_run(run_id=self.MLFLOWRUNID):
-
-            f1 = f1_score(latest_active_predictions["y"], latest_active_predictions["ypred"], average="weighted")
+            print("""latest_active_predictions["labelpred"]""", latest_active_predictions["labelpred"])
+            f1 = f1_score(latest_active_predictions["label"], latest_active_predictions["labelpred"], average="weighted")
 
             mlflow.log_metric("F1", f1)
 
@@ -157,17 +189,20 @@ Method MetricsMonitoring(fromdatetime As %String) As %Status [ Language = python
             mlflow.set_tag("model_id", latest_model)
             mlflow.set_tag("run_name", modelrun.data.tags.get('mlflow.runName'))
 
-            fig = custom_plot(PointSamples_df, Predictions_df)
-            mlflow.log_figure(fig, "plots/performance_monitoring.png")
-            plt.close(fig)
+            # Custom Plot
+            #; fig = custom_plot(PointSamples_df, Predictions_df)
+            #; mlflow.log_figure(fig, "plots/performance_monitoring.png")
+            #; plt.close(fig)
 
         self.Trigger(f1, fromdatetime) # Trigger retraining if performance degradation is detected
 
         return True
 
     except Exception as e:
-        print(f"MetricsMonitoring Error: {str(e)}")
-        #; iris._SYS.System.WriteToConsoleLog(f"MetricsMonitoring Error: {str(e)}", 0, 2)
+        import traceback
+        msg = traceback.format_exc()
+        print(f"MetricsMonitoring Error: {msg}")
+        #; iris._SYS.System.WriteToConsoleLog(f"MetricsMonitoring Error: {msg}", 0, 2)
         return False
 }
 

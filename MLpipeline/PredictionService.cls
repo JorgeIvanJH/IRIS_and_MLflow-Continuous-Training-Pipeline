@@ -55,6 +55,7 @@ ClassMethod CachedModelLoading() As %SYS.Python [ Language = python ]
 
         return iris.cls(__name__)._cached_model
     except Exception as e:
+        import traceback
         msg = traceback.format_exc()
         print(f"CachedModelLoading Error: {msg}")
         iris._SYS.System.WriteToConsoleLog(f"CachedModelLoading Error: {msg}", 0, 2)
@@ -64,7 +65,7 @@ ClassMethod CachedModelLoading() As %SYS.Python [ Language = python ]
 /*
 Uploads a CSV file to an IRIS table. It performs basic validation and type inference, including date parsing.
 */
-ClassMethod SavePredictions(model As %SYS.Python, indf As %SYS.Python, ypreds As %SYS.Python, predtime As %Double, namespace As %String = "USER") As %Status [ Language = python ]
+ClassMethod SavePredictions(model As %SYS.Python, indf As %SYS.Python, labelpreds As %SYS.Python, predtime As %Double, namespace As %String = "USER") As %Status [ Language = python ]
 {
     from sqlalchemy import create_engine
     import pandas as pd
@@ -78,9 +79,8 @@ ClassMethod SavePredictions(model As %SYS.Python, indf As %SYS.Python, ypreds As
         df_save = pd.DataFrame({})
         # df_save["ID"] will be auto-generated in IRIS as an identity column
         df_save["PointsIDForeignKey"] = indf["id"]
-        df_save["YPred"] = ypreds
-        df_save["Modelrunid"] = getattr(model, '_mlflow_run_id', "not_available")
-        df_save["MAE"] = abs(indf["y"] - ypreds)
+        df_save["LabelPred"] = labelpreds
+        df_save["Modelrunid"] = model.mlflow_model_info.metadata.get("run_id")
         df_save["InferenceTime"] = predtime/numrows if numrows > 0 else 0
         # df_save["datetime"] populated by default in IRIS with CURRENT_TIMESTAMP
 
@@ -121,10 +121,10 @@ ClassMethod Predict(filters As %String = "") As %String [ Language = python ]
         X["hour"] = indf["datetime"].dt.hour
         X["minute"] = indf["datetime"].dt.minute
         X["second"] = indf["datetime"].dt.second
-        y_preds, pred_time = decorated_predict(X)
-        iris.MLpipeline.PredictionService.SavePredictions(model, indf, y_preds, pred_time)
+        label_preds, pred_time = decorated_predict(X)
+        iris.MLpipeline.PredictionService.SavePredictions(model, indf, label_preds, pred_time)
         iris._SYS.System.WriteToConsoleLog(f"Prediction completed in {pred_time:.4f} seconds for {len(indf)} records.", 0, 0)
-        return json.dumps(y_preds.tolist() if hasattr(y_preds, 'tolist') else list(y_preds))
+        return json.dumps(label_preds.tolist() if hasattr(label_preds, 'tolist') else list(label_preds))
     except Exception as e:
         err_msg = f"Predict Error: {str(e)}"
         print(f"Predict Error: {err_msg}")
