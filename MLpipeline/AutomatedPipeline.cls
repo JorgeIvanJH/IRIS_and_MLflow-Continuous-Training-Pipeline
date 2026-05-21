@@ -134,7 +134,7 @@ Method DataExtraction(datetimestr As %String) As %SYS.Python [ Language = python
             schema="MLpipeline", 
             tablename="PointSamples", 
             columns="*", 
-            filters=f"datetime > '{safe_literal}'"
+            filters=f"datetime >= '{safe_literal}'"
         )
         iris._SYS.System.WriteToConsoleLog(f"DataExtraction completed.", 0, 0)
         return df
