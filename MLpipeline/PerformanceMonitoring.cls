@@ -180,7 +180,7 @@ Method MetricsMonitoring(fromdatetime As %String) As %Status [ Language = python
         latest_active_predictions["labelpred"] = latest_active_predictions["labelpred"].astype(str)
 
         with mlflow.start_run(run_id=self.MLFLOWRUNID):
-            print("""latest_active_predictions["labelpred"]""", latest_active_predictions["labelpred"])
+    
             f1 = f1_score(latest_active_predictions["label"], latest_active_predictions["labelpred"], average="weighted")
 
             mlflow.log_metric("F1", f1)

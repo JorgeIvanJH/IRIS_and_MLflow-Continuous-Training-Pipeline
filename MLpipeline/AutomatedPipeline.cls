@@ -61,9 +61,9 @@ ClassMethod ListToDynamicArray(list As %List) As %DynamicArray
 /*
 Set default values of parameters when a new instance of AutomatedPipeline is created.
 e.g:
-    set AP = ##class(MLpipeline.AutomatedPipeline).%New(42, 0.2, 5, 100, 16)
+    set AP = ##class(MLpipeline.AutomatedPipeline).%New(42, 0.2, 5, 5, 16)
 */
-Method %OnNew(seed As %Integer = 42, testSize As %Numeric(SCALE = 2) = 0.2, numCVSplits As %Integer = 5, numTrials As %Integer = 100, numWorkers As %Integer = 1, lrrange As %List = "", mdrange As %List = "", nerange As %List = "", nlrange As %List = "") As %Status [ Private ]
+Method %OnNew(seed As %Integer = 42, testSize As %Numeric(SCALE = 2) = 0.2, numCVSplits As %Integer = 5, numTrials As %Integer = 5, numWorkers As %Integer = 1, lrrange As %List = "", mdrange As %List = "", nerange As %List = "", nlrange As %List = "") As %Status [ Private ]
 {
 
     Set status = $$$OK
@@ -117,7 +117,7 @@ Method %OnNew(seed As %Integer = 42, testSize As %Numeric(SCALE = 2) = 0.2, numC
 /*
 Leverages the FeatureStore to extract data and transform it to pandas DataFrame.
 e.g:
-    set AP = ##class(MLpipeline.AutomatedPipeline).%New(42, 0.2, 5, 100, 16)
+    set AP = ##class(MLpipeline.AutomatedPipeline).%New(42, 0.2, 5, 5, 16)
     set df = AP.DataExtraction("2026-05-14 00:00:00")
 */
 Method DataExtraction(datetimestr As %String) As %SYS.Python [ Language = python ]
@@ -149,7 +149,7 @@ Method DataExtraction(datetimestr As %String) As %SYS.Python [ Language = python
 /*
 Validates the extracted DataFrame for missing values and logs the results.
 e.g:
-    set AP = ##class(MLpipeline.AutomatedPipeline).%New(42, 0.2, 5, 100, 16)
+    set AP = ##class(MLpipeline.AutomatedPipeline).%New(42, 0.2, 5, 5, 16)
     set df = AP.DataExtraction("2026-05-14 00:00:00")
     set validDf = AP.DataValidation(df)
 */
@@ -209,7 +209,7 @@ Method DataValidation(df As %SYS.Python) As %SYS.Python [ Language = python ]
 /* 
 Prepares the validated DataFrame for model training. All non-learned transforms (renames, type casting, no .fit() transformations) should be implemented here.
 e.g:
-    set AP = ##class(MLpipeline.AutomatedPipeline).%New(42, 0.2, 5, 100, 16)
+    set AP = ##class(MLpipeline.AutomatedPipeline).%New(42, 0.2, 5, 5, 16)
     set df = AP.DataExtraction("2026-05-14 00:00:00")
     set validDf = AP.DataValidation(df)
     set result = AP.DataPreparation(validDf)
@@ -276,7 +276,7 @@ Method DataPreparation(df As %SYS.Python) As %SYS.Python [ Language = python ]
 /*
 Trains a machine learning model (e.g., LinearRegression) using the prepared data and specified parameters. Every learned transformation that requires a .fit() should be implemented here (e.g., StandardScaler, PCA, etc.).
 e.g:
-    set AP = ##class(MLpipeline.AutomatedPipeline).%New(42, 0.2, 5, 100, 16)
+    set AP = ##class(MLpipeline.AutomatedPipeline).%New(42, 0.2, 5, 5, 16)
     set df = AP.DataExtraction("2026-05-14 00:00:00")
     set validDf = AP.DataValidation(df)
     set result = AP.DataPreparation(validDf)
@@ -459,7 +459,7 @@ Method ModelTraining(Xtrainval As %SYS.Python, Ytrainval As %SYS.Python, crossva
 /*
 Evaluates the trained model using the test data and returns performance metrics (e.g., F1 score, MAE, R2, etc.). Also creates SHAP explanations and logs them as artifacts in MLflow along with custom metrics and plots.
 e.g:
-    set AP = ##class(MLpipeline.AutomatedPipeline).%New(42, 0.2, 5, 100, 16)
+    set AP = ##class(MLpipeline.AutomatedPipeline).%New(42, 0.2, 5, 5, 16)
     set df = AP.DataExtraction("2026-05-14 00:00:00")
     set validDf = AP.DataValidation(df)
     set result = AP.DataPreparation(validDf)
@@ -585,7 +585,7 @@ Validation before promoting model to production.
 Compares performance to the current production model, and logs the results.
 Returns the best model's run ID for promotion.
 e.g:
-    set AP = ##class(MLpipeline.AutomatedPipeline).%New(42, 0.2, 5, 100, 16)
+    set AP = ##class(MLpipeline.AutomatedPipeline).%New(42, 0.2, 5, 5, 16)
     set df = AP.DataExtraction("2026-05-14 00:00:00")
     set validDf = AP.DataValidation(df)
     set result = AP.DataPreparation(validDf)
@@ -652,7 +652,7 @@ Method ModelValidation(newmodelmetrics As %SYS.Python, Xtest As %SYS.Python, Yte
 /*
 Runs the entire ML pipeline sequentially. Handles Each component's try/except.
 e.g:
-    set AP = ##class(MLpipeline.AutomatedPipeline).%New(42, 0.2, 5, 100, 16)
+    set AP = ##class(MLpipeline.AutomatedPipeline).%New(42, 0.2, 5, 5, 16)
     set summary = AP.RunPipeline("2026-05-14 00:00:00")
 */
 Method RunPipeline(datetimestr As %String) As %SYS.Python [ Language = python ]
