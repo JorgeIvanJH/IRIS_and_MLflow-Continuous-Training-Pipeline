@@ -11,7 +11,7 @@ COPY requirements.txt requirements.txt
 RUN pip install --no-cache-dir --target /install -r requirements.txt
 
 # Stage 2: Final image with InterSystems IRIS and the installed Python libraries
-FROM containers.intersystems.com/intersystems/iris-community:2025.1
+FROM containers.intersystems.com/intersystems/iris-community:2025.2
 
 # Switch to the root user to install necessary system packages
 USER root
