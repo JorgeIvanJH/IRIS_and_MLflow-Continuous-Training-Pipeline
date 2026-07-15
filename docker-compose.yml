@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   iris:
     build:
@@ -12,7 +10,9 @@ services:
       - "1972:1972"    # SuperServer port
       - "52773:52773"  # Management Portal/Web Gateway
     environment:
-      TZ: ${TZ}
+      TZ: ${TZ:?TZ is required}
+      MLFLOW_TRACKING_URI: "http://localhost:${MLFLOW_PORT:?MLFLOW_PORT is required}"
+      MLFLOW_TRACKING_URI_IRIS: "http://mlflow:${MLFLOW_PORT:?MLFLOW_PORT is required}"
     #   - ISC_DATA_DIRECTORY=/dur/iconfig  # Data directory inside the container (outside install dir)
     volumes:
       - ./dur/.:/dur:rw # map with read-write permissions
@@ -29,16 +29,16 @@ services:
     image: postgres:15
     container_name: mlflow-postgres
     environment:
-      POSTGRES_USER: ${POSTGRES_USER}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-      POSTGRES_DB: ${POSTGRES_DB}
-      TZ: ${TZ}
+      POSTGRES_USER: ${POSTGRES_USER:?POSTGRES_USER is required}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      POSTGRES_DB: ${POSTGRES_DB:?POSTGRES_DB is required}
+      TZ: ${TZ:?TZ is required}
     volumes:
       - ./dur/sandbox/mlflow/postgres:/var/lib/postgresql/data:rw
     ports:
       - "5432:5432"
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:?POSTGRES_USER is required} -d ${POSTGRES_DB:?POSTGRES_DB is required}"]
       interval: 5s
       timeout: 3s
       retries: 10
@@ -47,9 +47,9 @@ services:
     image: minio/minio:latest
     container_name: mlflow-minio
     environment:
-      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
-      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
-      TZ: ${TZ}
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:?MINIO_ROOT_USER is required}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?MINIO_ROOT_PASSWORD is required}
+      TZ: ${TZ:?TZ is required}
     volumes:
       - ./dur/sandbox/mlflow/minio:/data:rw
     command: server /data --console-address ":9001"
@@ -57,7 +57,7 @@ services:
       - "9000:9000"
       - "9001:9001"
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:${MINIO_PORT}/minio/health/live"]
+      test: ["CMD", "curl", "-f", "http://localhost:${MINIO_PORT:?MINIO_PORT is required}/minio/health/live"]
       interval: 5s
       timeout: 3s
       retries: 20
@@ -66,7 +66,7 @@ services:
     image: minio/mc:latest
     container_name: mlflow-create-bucket
     environment:
-      TZ: ${TZ}
+      TZ: ${TZ:?TZ is required}
     depends_on:
       minio:
         condition: service_healthy
@@ -74,13 +74,13 @@ services:
       - /bin/sh
       - -c
       - |
-        mc alias set myminio "http://${MINIO_HOST}:${MINIO_PORT}" \
-          "${MINIO_ROOT_USER}" "${MINIO_ROOT_PASSWORD}"
-        mc mb --ignore-existing "myminio/${MINIO_BUCKET:-mlflow}"
+        mc alias set myminio "http://${MINIO_HOST:?MINIO_HOST is required}:${MINIO_PORT:?MINIO_PORT is required}" \
+          "${MINIO_ROOT_USER:?MINIO_ROOT_USER is required}" "${MINIO_ROOT_PASSWORD:?MINIO_ROOT_PASSWORD is required}"
+        mc mb --ignore-existing "myminio/${MINIO_BUCKET:?MINIO_BUCKET is required}"
     restart: "no"
 
   mlflow:
-    image: ghcr.io/mlflow/mlflow:${MLFLOW_VERSION}
+    image: ghcr.io/mlflow/mlflow:v${MLFLOW_VERSION:?MLFLOW_VERSION is required}
     container_name: mlflow-server
     depends_on:
       postgres:
@@ -91,29 +91,29 @@ services:
         condition: service_completed_successfully
     environment:
       MLFLOW_SERVER_ALLOWED_HOSTS: "mlflow,mlflow-server,localhost,127.0.0.1"
-      MLFLOW_BACKEND_STORE_URI: ${MLFLOW_BACKEND_STORE_URI}
-      MLFLOW_S3_ENDPOINT_URL: ${MLFLOW_S3_ENDPOINT_URL}
-      MLFLOW_ARTIFACTS_DESTINATION: ${MLFLOW_ARTIFACTS_DESTINATION}
-      AWS_ACCESS_KEY_ID: ${MINIO_ROOT_USER}
-      AWS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD}
-      AWS_DEFAULT_REGION: ${AWS_DEFAULT_REGION}
+      MLFLOW_BACKEND_STORE_URI: "postgresql+psycopg2://${POSTGRES_USER:?POSTGRES_USER is required}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres:5432/${POSTGRES_DB:?POSTGRES_DB is required}"
+      MLFLOW_S3_ENDPOINT_URL: "http://${MINIO_HOST:?MINIO_HOST is required}:${MINIO_PORT:?MINIO_PORT is required}"
+      MLFLOW_ARTIFACTS_DESTINATION: "s3://${MINIO_BUCKET:?MINIO_BUCKET is required}"
+      AWS_ACCESS_KEY_ID: ${MINIO_ROOT_USER:?MINIO_ROOT_USER is required}
+      AWS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:?MINIO_ROOT_PASSWORD is required}
+      AWS_DEFAULT_REGION: ${AWS_DEFAULT_REGION:?AWS_DEFAULT_REGION is required}
       MLFLOW_S3_IGNORE_TLS: "true"
-      MLFLOW_HOST: ${MLFLOW_HOST}
-      MLFLOW_PORT: ${MLFLOW_PORT}
-      TZ: ${TZ}
+      MLFLOW_HOST: ${MLFLOW_HOST:?MLFLOW_HOST is required}
+      MLFLOW_PORT: ${MLFLOW_PORT:?MLFLOW_PORT is required}
+      TZ: ${TZ:?TZ is required}
     command:
       - /bin/bash
-      - -c
+      - -ec
       - |
         pip install --no-cache-dir psycopg2-binary boto3
-        mlflow server \
-          --backend-store-uri "${MLFLOW_BACKEND_STORE_URI}" \
-          --artifacts-destination "${MLFLOW_ARTIFACTS_DESTINATION}" \
+        exec mlflow server \
+          --backend-store-uri "$${MLFLOW_BACKEND_STORE_URI}" \
+          --artifacts-destination "$${MLFLOW_ARTIFACTS_DESTINATION}" \
           --serve-artifacts \
-          --host "${MLFLOW_HOST}" \
-          --port "${MLFLOW_PORT}" \
-          --allowed-hosts "mlflow:${MLFLOW_PORT},mlflow-server:${MLFLOW_PORT},localhost:*,127.0.0.1:*"
+          --host "$${MLFLOW_HOST}" \
+          --port "$${MLFLOW_PORT}" \
+          --allowed-hosts "mlflow:$${MLFLOW_PORT},mlflow-server:$${MLFLOW_PORT},localhost:*,127.0.0.1:*"
     ports:
-      - "${MLFLOW_PORT}:${MLFLOW_PORT}"
+      - "${MLFLOW_PORT:?MLFLOW_PORT is required}:${MLFLOW_PORT:?MLFLOW_PORT is required}"
     # optional: keep mlflow logs in that folder
     # (docker logs is usually enough, so this is optional)
