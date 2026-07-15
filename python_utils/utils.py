@@ -18,6 +18,59 @@ crossvalstrategy = StratifiedGroupKFold(
 )
 
 
+def create_iris_engine(namespace: str | None = None):
+    """Create an SQLAlchemy engine using the official InterSystems IRIS dialect."""
+    import importlib
+    import importlib.machinery
+    import importlib.util
+    import sys
+
+    # Embedded Python exposes its ObjectScript bridge as a top-level ``iris``
+    # module. The official DB-API driver uses an ``iris`` package instead. Load
+    # that package long enough to register ``iris.dbapi``, then restore the
+    # bridge that the rest of the pipeline uses.
+    embedded_iris = sys.modules.get("iris")
+    if embedded_iris is not None and not hasattr(embedded_iris, "__path__"):
+        sys.modules.pop("iris", None)
+        try:
+            client_spec = importlib.machinery.PathFinder.find_spec("iris", sys.path)
+            if client_spec is None or client_spec.loader is None:
+                raise RuntimeError("The official InterSystems DB-API package was not found")
+            client_iris = importlib.util.module_from_spec(client_spec)
+            sys.modules["iris"] = client_iris
+            client_spec.loader.exec_module(client_iris)
+            dbapi = importlib.import_module("iris.dbapi")
+        finally:
+            sys.modules["iris"] = embedded_iris
+        sys.modules["iris.dbapi"] = dbapi
+        embedded_iris.dbapi = dbapi
+
+    from sqlalchemy import URL, create_engine
+
+    required_settings = ("IRIS_USERNAME", "IRIS_PASSWORD")
+    missing_settings = [name for name in required_settings if not os.getenv(name)]
+    if missing_settings:
+        raise RuntimeError(
+            "Missing required IRIS connection settings: "
+            + ", ".join(missing_settings)
+        )
+
+    try:
+        port = int(os.getenv("IRIS_PORT", "1972"))
+    except ValueError as exc:
+        raise RuntimeError("IRIS_PORT must be an integer") from exc
+
+    url = URL.create(
+        drivername="iris",
+        username=os.environ["IRIS_USERNAME"],
+        password=os.environ["IRIS_PASSWORD"],
+        host=os.getenv("IRIS_SERVER", "localhost"),
+        port=port,
+        database=namespace or os.getenv("IRIS_NAMESPACE", "USER"),
+    )
+    return create_engine(url)
+
+
 def measure_time_decorator(func):
     @wraps(func)
     def wrapper(*args, **kwargs):

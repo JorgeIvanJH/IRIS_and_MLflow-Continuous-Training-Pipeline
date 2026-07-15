@@ -19,13 +19,14 @@ e.g:
 */
 Method UploadCSVtoIRIS(csvpath As %String, namespace As %String, package As %String, tablename As %String) As %Status [ Language = python ]
 {
-    from sqlalchemy import create_engine, text
+    from sqlalchemy import text
     import pandas as pd
     import iris
+    from python_utils.utils import create_iris_engine
     
     try:
         iris._SYS.System.WriteToConsoleLog(f"Starting CSV upload to IRIS: {csvpath} into {namespace}.{package}.{tablename}", 0, 0)
-        engine = create_engine(f"iris+emb:///{namespace}")
+        engine = create_iris_engine(namespace)
 
         create_table_sql = f"""
         CREATE TABLE {package}.{tablename} (
@@ -55,7 +56,7 @@ Method UploadCSVtoIRIS(csvpath As %String, namespace As %String, package As %Str
                 df[col] = pd.to_datetime(df[col], errors="coerce") # actual conversion
             except Exception:
                 continue
-        df.to_sql(tablename, engine, schema=package, if_exists='append', index=False, method='multi')
+        df.to_sql(tablename, engine, schema=package, if_exists='append', index=False)
         iris._SYS.System.WriteToConsoleLog("Successfully uploaded CSV to IRIS", 0, 0)
         return True
 
@@ -106,11 +107,12 @@ e.g:
 */
 Method CreatePredictionsTable(namespace As %String = "USER", package As %String = "MLpipeline", tablename As %String = "Predictions") As %Status [ Language = python ]
 {
-    from sqlalchemy import create_engine, text
+    from sqlalchemy import text
     import iris
+    from python_utils.utils import create_iris_engine
 
     try:
-        engine = create_engine(f"iris+emb:///{namespace}")
+        engine = create_iris_engine(namespace)
         
         create_table_sql = f"""
         CREATE TABLE {package}.{tablename} (

@@ -67,12 +67,12 @@ Uploads a CSV file to an IRIS table. It performs basic validation and type infer
 */
 ClassMethod SavePredictions(model As %SYS.Python, indf As %SYS.Python, labelpreds As %SYS.Python, predtime As %Double, namespace As %String = "USER") As %Status [ Language = python ]
 {
-    from sqlalchemy import create_engine
     import pandas as pd
     import iris
+    from python_utils.utils import create_iris_engine
     
     try:
-        engine = create_engine(f"iris+emb:///{namespace}")
+        engine = create_iris_engine(namespace)
 
         numrows, numcols = indf.shape
 
@@ -85,7 +85,7 @@ ClassMethod SavePredictions(model As %SYS.Python, indf As %SYS.Python, labelpred
         # df_save["datetime"] populated by default in IRIS with CURRENT_TIMESTAMP
 
         # Append data to the existing table
-        df_save.to_sql("Predictions", engine, schema="MLpipeline", if_exists='append', index=False, method='multi')
+        df_save.to_sql("Predictions", engine, schema="MLpipeline", if_exists='append', index=False)
         iris._SYS.System.WriteToConsoleLog(f"Successfully saved {numrows} predictions to MLpipeline.Predictions", 0, 0)
         return True
 
